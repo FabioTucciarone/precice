@@ -177,6 +177,9 @@ PGreedySolver<RADIAL_BASIS_FUNCTION_T>::PGreedySolver(RADIAL_BASIS_FUNCTION_T ba
   _cut = Eigen::MatrixXd::Zero(matWidth, matWidth);
   Eigen::MatrixXd _cop = Eigen::MatrixXd::Zero(matWidth, matWidth);
   Eigen::VectorXd v(_inSize);
+  std::vector<bool> centerBits(_inSize);
+
+  for(int j = 0; j < _inSize; ++j) centerBits.at(j) = false;
 
   // Convert dead axis vector into an active axis array so that we can handle the reduction more easily
   std::array<bool, 3> activeAxis({{false, false, false}});
@@ -190,18 +193,28 @@ PGreedySolver<RADIAL_BASIS_FUNCTION_T>::PGreedySolver(RADIAL_BASIS_FUNCTION_T ba
 
     if (pMax < _tolP) break;
 
-    _greedyIDs.push_back(i);  // bitvektor setzen => ids und ~ids?
+    _greedyIDs.push_back(i);  // bitvektor setzen => ids und ~ids? // TODO: Powerfunktion auf -1 setzen und verwenden? Powerfunktion >= 0 ?
 
     updateKernelVector(basisFunction, inputMesh, v, x);
-    v -= _basisMatrix.block(0, 0, _inSize, n) * _basisMatrix.block(i, 0, 1, n).transpose(); 
-    v /= std::sqrt(pMax);                                   // v = [v_n(x_1), ..., v_n(x_N)]^T (N = _inSize)  // nur X \ _centers und x_n nötig
 
-    _powerFunction -= (Eigen::VectorXd) v.array().square(); // P = [P_n(x_1), ..., P_n(x_N)]^T                // nur X \ _centers nötig
+    double sqrtP = std::sqrt(pMax);  
+
+    for(int j = 0; j < _inSize; ++j) { // Vektorisierung kaputt: Sehr langsam
+      if(!centerBits.at(j)) {
+        v(j) -= (_basisMatrix.block(j, 0, 1, n) *  _basisMatrix.block(i, 0, 1, n).transpose())(0,0);
+        v(j) /= sqrtP;                                
+        _powerFunction(j) -= v(j) * v(j);
+      }
+    }
+    
+    centerBits.at(i) = true;
     _basisMatrix.col(n) = v;
 
     _cut.block(n, 0, 1, n).noalias() = -_basisMatrix.block(i, 0, 1, n) * _cut.block(0, 0, n, n).triangularView<Eigen::Lower>();
     _cut(n,n) = 1;
     _cut.block(n, 0, 1, n+1) /= v(i);
+
+    std::cout << "iteration = " << n << "\r";
   }
 
   //mesh::Mesh centerMesh("greedy-centers", inputMesh.getDimensions(), mesh::Mesh::MESH_ID_UNDEFINED);
