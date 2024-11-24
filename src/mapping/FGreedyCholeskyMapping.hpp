@@ -81,10 +81,10 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &inputData) {
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &y) {
 
   Eigen::VectorXd basisVector(super::_inSize);
-  Eigen::MatrixXd residual = inputData;
+  Eigen::MatrixXd residual = y;
   super::_greedyIDs.clear();
 
   // Iterative selection of new points
@@ -97,8 +97,10 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
     basisVector -= _basisMatrix.block(0, 0, super::_inSize, n) * _basisMatrix.block(i, 0, 1, n).transpose();
 
     if (fMax < super::_tolerance || basisVector(i) <= 0 || n == super::_basisSize - 1) {
-      if (fMax < super::_tolerance || basisVector(i) <= 0) 
+      if (fMax < super::_tolerance || basisVector(i) <= 0) {
+        std::cout << " >> STOP " << fMax << " < " << super::_tolerance << std::endl;
         break;
+      }
       super::calculateIncreasedNumberOfCenters();
       _basisMatrix.conservativeResize(super::_inSize, super::_basisSize);
     }
@@ -115,6 +117,8 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
   }
 
   PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.");
+
+  std::cout << " >> INITIAL RESIDUAL: " << residual.squaredNorm() << std::endl;
 
   _choleskyA = _basisMatrix(super::_greedyIDs, Eigen::seqN(0, super::_greedyIDs.size()));
 
@@ -137,7 +141,21 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
     y -= super::_polyMatrixQ * polynomialCoeffs;
   }
 
-  buildInterpolationMatrices(y);
+  if (super::_greedyIDs.size() == 0) {
+    std::cout << " >> BUILD " << std::endl;
+    buildInterpolationMatrices(y);
+  }
+  
+  precice::profiling::Event er("recalcResidual", profiling::Synchronize);
+
+  Eigen::MatrixXd residual = y;
+  for (size_t i = 0; i < super::_greedyIDs.size(); i++) {
+    const double invP = 1.0 / _choleskyA(i, i);
+    const Eigen::VectorXd newtonCoefficient = residual.row(super::_greedyIDs.at(i)).transpose() * invP;
+    residual -= _basisMatrix.col(i) * newtonCoefficient.transpose();
+  }
+  er.stop();
+  std::cout << " >> RESIDUAL: " << residual.squaredNorm() << std::endl;
 
   Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
   _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
