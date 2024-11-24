@@ -110,8 +110,8 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
     basisVector *= invP;
     _basisMatrix.col(n) = basisVector;
 
-    const Eigen::VectorXd newtonCoefficient = residual.row(i).transpose() * invP;
-    residual -= basisVector * newtonCoefficient.transpose();
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP;
+    residual -= basisVector * newtonCoefficient;
 
     PRECICE_DEBUG("Iteration: {}, fMax = {}\n", n + 1, fMax);
   }
