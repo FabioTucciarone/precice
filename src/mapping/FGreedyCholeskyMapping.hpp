@@ -151,8 +151,8 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
   Eigen::MatrixXd residual = y;
   for (size_t i = 0; i < super::_greedyIDs.size(); i++) {
     const double invP = 1.0 / _choleskyA(i, i);
-    const Eigen::VectorXd newtonCoefficient = residual.row(super::_greedyIDs.at(i)).transpose() * invP;
-    residual -= _basisMatrix.col(i) * newtonCoefficient.transpose();
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(super::_greedyIDs.at(i)) * invP;
+    residual -= _basisMatrix.col(i) * newtonCoefficient;
   }
   er.stop();
   std::cout << " >> RESIDUAL: " << residual.squaredNorm() << std::endl;
