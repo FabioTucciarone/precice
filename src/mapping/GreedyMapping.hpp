@@ -68,7 +68,6 @@ protected:
   Eigen::ColPivHouseholderQR<Eigen::MatrixXd> _qrDecomposedQ;
 
   std::pair<int, double> select(const Eigen::VectorXd &powerFunction) const;
-  std::pair<int, double> select(const Eigen::MatrixXd &residual) const;
 
   void fillEvaluationMatrix();
   void fillPolynomialMatrices();
