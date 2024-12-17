@@ -18,6 +18,10 @@
 #include <iostream>
 #include <fstream>
 
+
+#define PRINT_FULL_OUTPUT false
+
+
 namespace precice {
 namespace mapping {
 
@@ -53,12 +57,19 @@ private:
   Eigen::MatrixXd _basisMatrix;
   Eigen::MatrixXd _choleskyA;
 
+  double _referenceResidualNorm;
+
   std::pair<int, double> selectMax(const Eigen::MatrixXd &residual) const;
+  std::pair<int, double> selectMax(const Eigen::MatrixXd &residual, const std::vector<int> &greedyIDs) const;
   std::pair<int, double> selectMin(const Eigen::MatrixXd &residual) const;
 
   void buildInterpolationMatrices(const Eigen::MatrixXd &y);
+  void buildInterpolationMatrices(const Eigen::MatrixXd &residual0, const size_t n0);
 
-  void exchange(const Eigen::MatrixXd &y, Eigen::MatrixXd &residual);
+  void exchange(const Eigen::MatrixXd &y, size_t removealN);
+  void reorderBasis(const Eigen::MatrixXd &y, const size_t removealN);
+
+  Eigen::MatrixXd recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend);
 };
 
 
@@ -77,6 +88,13 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 std::pair<int, double> FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::selectMax(const Eigen::MatrixXd &residual) const {
   Eigen::Index maxIndex;
   double       maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
+  return {maxIndex, maxValue};
+}
+
+template <typename RADIAL_BASIS_FUNCTION_T>
+std::pair<int, double> FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::selectMax(const Eigen::MatrixXd &residual, const std::vector<int> &greedyIDs) const {
+  Eigen::Index maxIndex;
+  double       maxValue = residual.rowwise().squaredNorm()(greedyIDs).maxCoeff(&maxIndex);
   return {maxIndex, maxValue};
 }
 
@@ -108,7 +126,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
   // Iterative selection of new points
   for (size_t n = 0; n < super::_maxIter; ++n) {
 
-    const auto [i, fMax] = super::selectMax(residual);
+    const auto [i, fMax] = selectMax(residual);
     const auto x         = super::_inputMesh->vertices().at(i);
 
     super::updateKernelVector(x, boost::irange(0UL, super::_inSize), basisVector);
@@ -116,7 +134,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
 
     if (fMax < super::_tolerance || basisVector(i) <= 0 || n == super::_basisSize - 1) {
       if (fMax < super::_tolerance || basisVector(i) <= 0) {
-        std::cout << " >> STOP " << fMax << " < " << super::_tolerance << std::endl;
+        std::cout << " > STOP " << fMax << " < " << super::_tolerance << std::endl;
         break;
       }
       super::calculateIncreasedNumberOfCenters();
@@ -128,43 +146,175 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
     basisVector *= invP;
     _basisMatrix.col(n) = basisVector;
 
-    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP;
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP; // temp alloc
     residual -= basisVector * newtonCoefficient;
 
     PRECICE_DEBUG("Iteration: {}, fMax = {}\n", n + 1, fMax);
   }
 
-  PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.");
-
-  std::cout << " >> INITIAL RESIDUAL: " << residual.squaredNorm() << std::endl;
-
   _choleskyA = _basisMatrix(super::_greedyIDs, Eigen::seqN(0, super::_greedyIDs.size()));
+  _referenceResidualNorm = residual.squaredNorm();
 
   super::fillEvaluationMatrix();
 }
 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, Eigen::MatrixXd &residual) {
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &r0, const size_t n0) {
+
+  precice::profiling::Event exchangeEvent("buildInterpolationMatrices(r0,n0)", profiling::Synchronize);
+
+  std::cout << "\n > buildInterpolationMatrices(const Eigen::MatrixXd &r0, const size_t n0): \n";
 
   Eigen::VectorXd basisVector(super::_inSize);
+  Eigen::MatrixXd residual = r0; // KOPIE???
 
-  for (size_t n = 0; n < super::_maxIter; ++n) {
-    const auto [iMax, fMax] = super::selectMax(residual);
-    const auto [jMin, fMin] = super::selectMin(residual); // iMin = _greedyIDs[iGMin] // TODO: Austauschen durch eine Funktion?
-    int iMin = super::_greedyIds.at(jMin);
+  size_t initialN = super::_greedyIDs.size();
 
-    const auto x = super::_inputMesh->vertices().at(iMin);
+  super::_greedyIDs.erase(super::_greedyIDs.begin() + n0, super::_greedyIDs.end()); // n0 = 0 => Recalc everything
+  // Iterative selection of new points
+  for (size_t n = n0; n < super::_maxIter; ++n) {
+
+    const auto [i, fMax] = selectMax(residual);
+    const auto x         = super::_inputMesh->vertices().at(i);
+
     super::updateKernelVector(x, boost::irange(0UL, super::_inSize), basisVector);
-    basisVector -= _basisMatrix.block(0, 0, super::_inSize, n) * _basisMatrix.block(i, 0, 1, n).transpose(); //????
+    basisVector -= _basisMatrix.block(0, 0, super::_inSize, n) * _basisMatrix.block(i, 0, 1, n).transpose();
+
+    if (fMax < super::_tolerance || basisVector(i) <= 0 || n == super::_basisSize - 1) {
+      if (fMax < super::_tolerance || basisVector(i) <= 0) {
+        // std::cout << " > STOP " << fMax << " < " << super::_tolerance << std::endl;
+        break;
+      }
+      super::calculateIncreasedNumberOfCenters();
+      _basisMatrix.conservativeResize(super::_inSize, super::_basisSize);
+    }
+    super::_greedyIDs.push_back(i);
+
+    const double invP = 1.0 / std::sqrt(basisVector(i));
+    basisVector *= invP;
+    _basisMatrix.col(n) = basisVector;
+
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP; // temp alloc
+    residual -= basisVector * newtonCoefficient;
   }
 
+  //PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.");
+
+  _choleskyA = _basisMatrix(super::_greedyIDs, Eigen::seqN(0, super::_greedyIDs.size()));
+
+  _referenceResidualNorm = residual.squaredNorm();
+  int difference = int(initialN) - int(super::_greedyIDs.size());
+  fmt::print("   [{}] {} -> {} -> {} (removed: {}%, difference: {})\n", super::_inSize, initialN, n0, super::_greedyIDs.size(), float(initialN - n0) / initialN * 100, difference);
+
+  super::fillEvaluationMatrix();
 }
 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, size_t removealN) {
+
+  precice::profiling::Event exchangeEvent("exchange(y,res,p)", profiling::Synchronize);
+
+  Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
+  _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
+  _choleskyA.transpose().triangularView<Eigen::Upper>().solveInPlace(interpolationCoeffs);
+
+  size_t n = super::_greedyIDs.size();
+
+  double minResidualNorm = std::numeric_limits<double>::max();
+  double rebuildIndex = n; // TODO: Randfall am Ende "minM = n" STARTWERT????
+
+  double Ap = _basisFunction.evaluate(0);
+  for (size_t m = 0; m < n; m++) { // m in greedy Raum
+    double partialResidual = (interpolationCoeffs.row(m) * Ap).squaredNorm();
+    if (partialResidual <= minResidualNorm) { // < oder <= ???
+      minResidualNorm = partialResidual;
+      rebuildIndex = m;
+    }
+  }
+
+  if (rebuildIndex != n) {
+    precice::profiling::Event exchangeRebuildEvent("exchange(y,res,p) > rebuild", profiling::Synchronize);
+    buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
+    exchangeRebuildEvent.stop();
+  }
+}
+
+// REORDER unreusable in GREEDY SPACE!!
+template <typename RADIAL_BASIS_FUNCTION_T>
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::MatrixXd &y, const size_t removealN) { 
+
+  precice::profiling::Event reorderBasisEvent("reorderBasis(y,maxN)", profiling::Synchronize);
+
+  size_t N = super::_greedyIDs.size();
+
+  Eigen::VectorXd basisVector = Eigen::VectorXd::Zero(N); // trotzedm alle Auswertungen benötigt
+  Eigen::MatrixXd residual = y(super::_greedyIDs, Eigen::all);
+  Eigen::MatrixXd localBasisMatrix = Eigen::MatrixXd::Zero(N, N); 
+  std::vector<int> reorderedIDs;
+  reorderedIDs.reserve(N);
+
+  for (size_t n = 0; n < N - removealN; ++n) {
+
+    const auto [i, fMax] = selectMax(residual);
+    const size_t j       = super::_greedyIDs.at(i);
+    const auto   x       = super::_inputMesh->vertices().at(j);
+
+    super::updateKernelVector(x, super::_greedyIDs, basisVector);
+    basisVector -= localBasisMatrix.block(0, 0, N, n) * localBasisMatrix.block(i, 0, 1, n).transpose();
+
+    reorderedIDs.push_back(j); // hinzufügen in globalem Raum
+
+    const double invP = 1.0 / std::sqrt(basisVector(i));
+    basisVector *= invP;
+    localBasisMatrix.col(n) = basisVector;
+
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP; // temp alloc
+    residual -= basisVector * newtonCoefficient;
+  }
+  //PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.");
+
+  size_t rebuildIndex = N;
+  for (size_t i = 0; i < N; i++) {
+    if (std::find(reorderedIDs.begin(), reorderedIDs.end(), super::_greedyIDs.at(i)) == reorderedIDs.end()) { 
+      rebuildIndex = i;
+      break;
+    }
+  }
+
+  if (rebuildIndex != N) {
+    buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
+  }
+}
+
+
+template <typename RADIAL_BASIS_FUNCTION_T>
+Eigen::MatrixXd FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend) {
+  precice::profiling::Event recalcResidualEvent("recalculateResidual(basisExtend)", profiling::Synchronize);
+
+  //std::cout << "\n > recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend):\n";
+
+  PRECICE_ASSERT(basisExtend <= super::_greedyIDs.size());
+
+  Eigen::MatrixXd residual = y;
+  for (size_t i = 0; i < basisExtend; i++) {
+    int j = super::_greedyIDs.at(i);
+    const double invP = 1.0 / _choleskyA(i, i); // TODO: _basisMatrix(j, i)?
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(j) * invP;
+    residual -= _basisMatrix.col(i) * newtonCoefficient;
+  }
+  //std::cout << "   ||res|| = " << residual.squaredNorm() << ",  max: " << residual.maxCoeff() << "  ( basisExtend = " << basisExtend << " )\n";
+  //std::cout << std::endl;
+
+  return residual;
+}
+
+template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
   
+  std::cout << "\nSTEP mapConsistent(inData, outData):\n";
+
   precice::profiling::Event e("map.f-greedy-cholesky.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
@@ -178,22 +328,41 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
   }
 
   if (super::_greedyIDs.size() == 0) {
-    std::cout << " >> BUILD " << std::endl;
-    buildInterpolationMatrices(y);
+    std::cout << " > initial build " << std::endl;
+    precice::profiling::Event buildInitialSolutionEvent("build_initial_solution", profiling::Synchronize);
+    buildInterpolationMatrices(y, 0);
+    buildInitialSolutionEvent.stop();
   }
-  
-  precice::profiling::Event er("recalcResidual", profiling::Synchronize);
 
-  Eigen::MatrixXd residual = y;
-  for (size_t i = 0; i < super::_greedyIDs.size(); i++) {
-    const double invP = 1.0 / _choleskyA(i, i);
-    const Eigen::RowVectorXd newtonCoefficient = residual.row(super::_greedyIDs.at(i)) * invP;
-    residual -= _basisMatrix.col(i) * newtonCoefficient;
+  size_t n = super::_greedyIDs.size();
+
+  //Eigen::MatrixXd residual = recalculateResidual(y, n);
+
+  enum UpdateType {REBUILD_AT_TOLERANCE, REORDER_PARTIAL_REBUILD, EXCHANGE_PARTIAL_REBUILD};
+  UpdateType updateType = UpdateType::EXCHANGE_PARTIAL_REBUILD;
+  double rebuildTolerance = 10 * _referenceResidualNorm;
+  int removalN = 1;
+
+  switch (updateType) {
+  case UpdateType::REBUILD_AT_TOLERANCE:
+    if (rebuildTolerance == 0) buildInterpolationMatrices(y, 0);
+    else {
+      const Eigen::MatrixXd residual = recalculateResidual(y, n); // CONST KOPIE?
+      fmt::print("   res = {}\n", residual.squaredNorm());
+      if (rebuildTolerance < residual.squaredNorm()) { 
+        buildInterpolationMatrices(residual, 0); 
+      }
+    }
+    break;
+  case UpdateType::REORDER_PARTIAL_REBUILD:
+    reorderBasis(y, removalN);
+    break;
+  case UpdateType::EXCHANGE_PARTIAL_REBUILD:
+    exchange(y, removalN);
+    break;
   }
-  er.stop();
-  std::cout << " >> RESIDUAL: " << residual.squaredNorm() << std::endl;
 
-  exchange(y, residual);
+  precice::profiling::Event solveEvent("solve_cholesky", profiling::Synchronize);
 
   Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
   _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
@@ -207,6 +376,8 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
       outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) += super::_polyMatrixU * polynomialCoeffs.col(d);
     }
   }
+  solveEvent.stop();
+  std::cout << "\nEND mapConsistent(inData, outData):\n\n";
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>

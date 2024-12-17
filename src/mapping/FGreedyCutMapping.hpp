@@ -72,6 +72,8 @@ FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::FGreedyCutMapping(
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &inputData, Eigen::MatrixXd &interpolationCoeffs, Eigen::MatrixXd &residual) {
 
+  //TODO Nutze aus, dass Kernel Matrix Symmetrisch ist?
+
   const mesh::Mesh::VertexContainer &inputVertices = super::_inputMesh->vertices();
 
   const int   n = super::_greedyIDs.size();

@@ -200,13 +200,6 @@ std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eige
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::MatrixXd &residual) const {
-  Eigen::Index maxIndex;
-  double       maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
-  return {maxIndex, maxValue};
-}
-
-template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConservativeWithCut(const time::Sample &inData, const Eigen::MatrixXd &cut, Eigen::VectorXd &outData) const {
   const Eigen::VectorXd &linearisedVectors = inData.values;
 
