@@ -212,40 +212,51 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, size_t removealN) {
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, size_t removalN) {
 
-  precice::profiling::Event exchangeEvent("exchange(y,res,p)", profiling::Synchronize);
-
-  Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
-  _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
-  _choleskyA.transpose().triangularView<Eigen::Upper>().solveInPlace(interpolationCoeffs);
+  precice::profiling::Event removeEvent("exchange(y, removalN) > Remove", profiling::Synchronize);
 
   size_t n = super::_greedyIDs.size();
+  Eigen::MatrixXd inverseCholeskyA = Eigen::MatrixXd::Identity(n, n);
+  _choleskyA.triangularView<Eigen::Lower>().solveInPlace(inverseCholeskyA);
+  Eigen::MatrixXd interpolationCoeffs = inverseCholeskyA.transpose() * inverseCholeskyA * y(super::_greedyIDs, Eigen::all);
+  
+  Eigen::MatrixXd _partialInverseA = Eigen::MatrixXd::Zero(2 * removalN - 1, 2 * removalN - 1);
+
 
   double minResidualNorm = std::numeric_limits<double>::max();
   double rebuildIndex = n; // TODO: Randfall am Ende "minM = n" STARTWERT????
 
-  double Ap = _basisFunction.evaluate(0);
-  for (size_t m = 0; m < n; m++) { // m in greedy Raum
-    double partialResidual = (interpolationCoeffs.row(m) * Ap).squaredNorm();
+  size_t blockHeight = removalN;
+  for (size_t m = 0; m < n; m += blockHeight) { // m in greedy Raum
+    if (m + 2 * removalN > n) blockHeight = n - m;
+    size_t blockLength = m + blockHeight;
+
+    _partialInverseA.block(0, 0, blockHeight, blockHeight) = inverseCholeskyA.block(m, 0, blockHeight, blockLength) * inverseCholeskyA.block(m, 0, blockHeight, blockLength).transpose();
+    double partialResidual = (_partialInverseA.block(0, 0, blockHeight, blockHeight).inverse() * interpolationCoeffs.block(m, 0, blockHeight, interpolationCoeffs.cols())).squaredNorm();
+
     if (partialResidual <= minResidualNorm) { // < oder <= ???
       minResidualNorm = partialResidual;
       rebuildIndex = m;
     }
   }
 
+  removeEvent.stop();
+
+  precice::profiling::Event exchangeRebuildEvent("exchange(y, removalN) > Rebuild", profiling::Synchronize);
+
   if (rebuildIndex != n) {
-    precice::profiling::Event exchangeRebuildEvent("exchange(y,res,p) > rebuild", profiling::Synchronize);
     buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
-    exchangeRebuildEvent.stop();
   }
+
+  exchangeRebuildEvent.stop();
 }
 
 // REORDER unreusable in GREEDY SPACE!!
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::MatrixXd &y, const size_t removealN) { 
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::MatrixXd &y, const size_t removalN) { 
 
-  precice::profiling::Event reorderBasisEvent("reorderBasis(y,maxN)", profiling::Synchronize);
+  precice::profiling::Event removeEvent("reorderBasis(y, removalN) > Remove", profiling::Synchronize);
 
   size_t N = super::_greedyIDs.size();
 
@@ -255,7 +266,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::
   std::vector<int> reorderedIDs;
   reorderedIDs.reserve(N);
 
-  for (size_t n = 0; n < N - removealN; ++n) {
+  for (size_t n = 0; n < N - removalN; ++n) {
 
     const auto [i, fMax] = selectMax(residual);
     const size_t j       = super::_greedyIDs.at(i);
@@ -283,15 +294,21 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::
     }
   }
 
+  removeEvent.stop();
+
+  precice::profiling::Event rebuildEvent("reorderBasis(y, removalN) > Rebuild", profiling::Synchronize);
+
   if (rebuildIndex != N) {
     buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
   }
+
+  rebuildEvent.stop();
 }
 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 Eigen::MatrixXd FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend) {
-  precice::profiling::Event recalcResidualEvent("recalculateResidual(basisExtend)", profiling::Synchronize);
+  precice::profiling::Event recalcResidualEvent("recalculateResidual(y, basisExtend)", profiling::Synchronize);
 
   //std::cout << "\n > recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend):\n";
 
@@ -315,7 +332,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
   
   std::cout << "\nSTEP mapConsistent(inData, outData):\n";
 
-  precice::profiling::Event e("map.f-greedy-cholesky.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event mapConsistentEvent("mapConsistent(inData, outData)", profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();
@@ -327,42 +344,41 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
     y -= super::_polyMatrixQ * polynomialCoeffs;
   }
 
+  precice::profiling::Event buildEvent("mapConsistent(inData, outData) > Build", profiling::Synchronize);
+
   if (super::_greedyIDs.size() == 0) {
-    std::cout << " > initial build " << std::endl;
-    precice::profiling::Event buildInitialSolutionEvent("build_initial_solution", profiling::Synchronize);
     buildInterpolationMatrices(y, 0);
-    buildInitialSolutionEvent.stop();
   }
+  else {
+    size_t n = super::_greedyIDs.size();
 
-  size_t n = super::_greedyIDs.size();
+    enum UpdateType {REBUILD_AT_TOLERANCE, REORDER_PARTIAL_REBUILD, EXCHANGE_PARTIAL_REBUILD};
+    UpdateType updateType = UpdateType::EXCHANGE_PARTIAL_REBUILD;
+    double rebuildTolerance = 10 * _referenceResidualNorm;
+    int removalN = 5;
 
-  //Eigen::MatrixXd residual = recalculateResidual(y, n);
-
-  enum UpdateType {REBUILD_AT_TOLERANCE, REORDER_PARTIAL_REBUILD, EXCHANGE_PARTIAL_REBUILD};
-  UpdateType updateType = UpdateType::EXCHANGE_PARTIAL_REBUILD;
-  double rebuildTolerance = 10 * _referenceResidualNorm;
-  int removalN = 1;
-
-  switch (updateType) {
-  case UpdateType::REBUILD_AT_TOLERANCE:
-    if (rebuildTolerance == 0) buildInterpolationMatrices(y, 0);
-    else {
-      const Eigen::MatrixXd residual = recalculateResidual(y, n); // CONST KOPIE?
-      fmt::print("   res = {}\n", residual.squaredNorm());
-      if (rebuildTolerance < residual.squaredNorm()) { 
-        buildInterpolationMatrices(residual, 0); 
+    switch (updateType) {
+    case UpdateType::REBUILD_AT_TOLERANCE:
+      if (rebuildTolerance == 0) buildInterpolationMatrices(y, 0);
+      else {
+        const Eigen::MatrixXd residual = recalculateResidual(y, n);
+        if (rebuildTolerance < residual.squaredNorm()) { 
+          buildInterpolationMatrices(residual, 0); 
+        }
       }
+      break;
+    case UpdateType::REORDER_PARTIAL_REBUILD:
+      reorderBasis(y, removalN);
+      break;
+    case UpdateType::EXCHANGE_PARTIAL_REBUILD:
+      exchange(y, removalN);
+      break;
     }
-    break;
-  case UpdateType::REORDER_PARTIAL_REBUILD:
-    reorderBasis(y, removalN);
-    break;
-  case UpdateType::EXCHANGE_PARTIAL_REBUILD:
-    exchange(y, removalN);
-    break;
   }
 
-  precice::profiling::Event solveEvent("solve_cholesky", profiling::Synchronize);
+  buildEvent.stop();
+
+  precice::profiling::Event solveEvent("mapConsistent(inData, outData) > Solve", profiling::Synchronize);
 
   Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
   _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
@@ -376,7 +392,9 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
       outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) += super::_polyMatrixU * polynomialCoeffs.col(d);
     }
   }
+
   solveEvent.stop();
+
   std::cout << "\nEND mapConsistent(inData, outData):\n\n";
 }
 
