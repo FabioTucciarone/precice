@@ -69,7 +69,7 @@ protected:
 
   std::pair<int, double> select(const Eigen::VectorXd &powerFunction) const;
 
-  void fillEvaluationMatrix();
+  void fillEvaluationMatrix(size_t n0);
   void fillPolynomialMatrices();
 
   template <typename IndexContainer>
@@ -121,17 +121,20 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::fillPolynomialMatrices() {
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::fillEvaluationMatrix() {
+void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::fillEvaluationMatrix(size_t n0) {
 
   precice::profiling::Event e("fillEvaluationMatrix", profiling::Synchronize);
 
   const mesh::Mesh::VertexContainer &inputVertices  = _inputMesh->vertices();
   const mesh::Mesh::VertexContainer &outputVertices = _outputMesh->vertices();
-  _kernelEval.resize(_greedyIDs.size(), outputVertices.size());
 
-  for (size_t i = 0; i < _greedyIDs.size(); i++) {
+  if (_kernelEval.rows() < _greedyIDs.size() || _kernelEval.cols() < _outSize) {
+    _kernelEval.conservativeResize(_greedyIDs.size(), _outSize);
+  }
+
+  for (size_t i = n0; i < _greedyIDs.size(); i++) {
     const auto &u = inputVertices.at(_greedyIDs.at(i)).rawCoords();
-    for (size_t j = 0; j < outputVertices.size(); j++) {
+    for (size_t j = 0; j < _outSize; j++) {
       const auto & v    = outputVertices.at(j).rawCoords();
       const double d    = computeSquaredDifference(u, v, _activeAxis);
       _kernelEval(i, j) = _basisFunction.evaluate(std::sqrt(d));
@@ -142,8 +145,6 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::fillEvaluationMatrix() {
 template <typename RADIAL_BASIS_FUNCTION_T> 
 template<typename IndexContainer>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateKernelVector(const mesh::Vertex &x, const IndexContainer &ids, Eigen::VectorXd &kernelVector) const {
-
-  precice::profiling::Event e("updateKernelVector", profiling::Synchronize);
 
   const mesh::Mesh::VertexContainer &inputVertices = _inputMesh->vertices();
   for (const auto &j : ids | boost::adaptors::indexed()) {
@@ -206,7 +207,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConservativeWithCut(const time
   const size_t          n = _greedyIDs.size();
   const Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, _outSize).transpose();
 
-  Eigen::MatrixXd u = _kernelEval * y;
+  Eigen::MatrixXd u = _kernelEval.block(0, 0, n, _outSize) * y;
   Eigen::MatrixXd Cu = cut.block(0, 0, n, n).triangularView<Eigen::Lower>() * u;
   Eigen::MatrixXd greedySolution = (cut.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * Cu)(_greedyIDs, Eigen::all);
 
@@ -230,7 +231,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConservativeWithCholesky(const
   const size_t          n = _greedyIDs.size();
   const Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, _outSize).transpose();
 
-  Eigen::MatrixXd greedySolution = _kernelEval * y;
+  Eigen::MatrixXd greedySolution = _kernelEval.block(0, 0, n, _outSize) * y;
   choleskyA.block(0, 0, n, n).triangularView<Eigen::Lower>().solveInPlace(greedySolution);
   choleskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>().solveInPlace(greedySolution);
 
@@ -265,7 +266,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentWithCut(const time::
   const Eigen::MatrixXd interpolationCoeffs = cut.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * Cz;
 
   for (int d = 0; d < inData.dataDims; d++) {
-    outData(Eigen::seqN(d, _outSize, inData.dataDims)) = _kernelEval.transpose() * interpolationCoeffs.col(d);
+    outData(Eigen::seqN(d, _outSize, inData.dataDims)) = _kernelEval.block(0, 0, n, _outSize).transpose() * interpolationCoeffs.col(d);
   }
   if (_usesPolynomial) {
     for (int d = 0; d < inData.dataDims; d++) {
@@ -291,7 +292,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentWithCholesky(const t
   choleskyA.transpose().triangularView<Eigen::Upper>().solveInPlace(interpolationCoeffs);
 
   for (int d = 0; d < inData.dataDims; d++) {
-    outData(Eigen::seqN(d, _outSize, inData.dataDims)) = _kernelEval.transpose() * interpolationCoeffs.col(d);
+    outData(Eigen::seqN(d, _outSize, inData.dataDims)) = _kernelEval.block(0, 0, _greedyIDs.size(), _outSize).transpose() * interpolationCoeffs.col(d);
   }
   if (_usesPolynomial) {
     for (int d = 0; d < inData.dataDims; d++) {

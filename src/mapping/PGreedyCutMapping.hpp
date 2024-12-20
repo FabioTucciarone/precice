@@ -128,7 +128,7 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   }
   PRECICE_INFO("Finished greedy search and construction of inverse.");
 
-  super::fillEvaluationMatrix();
+  super::fillEvaluationMatrix(0);
   if (super::_usesPolynomial) {
     super::fillPolynomialMatrices();
   }

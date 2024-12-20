@@ -114,7 +114,7 @@ void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   _choleskyA   =  _basisMatrix(super::_greedyIDs, Eigen::seqN(0, super::_greedyIDs.size()));
   _basisMatrix = Eigen::MatrixXd();
 
-  super::fillEvaluationMatrix();
+  super::fillEvaluationMatrix(0);
   if (super::_usesPolynomial) {
     super::fillPolynomialMatrices();
   }
