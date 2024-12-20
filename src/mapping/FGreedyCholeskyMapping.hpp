@@ -251,11 +251,10 @@ Eigen::MatrixXd FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResi
   Eigen::MatrixXd residual = y;
   for (size_t i = 0; i < basisExtend; i++) {
     int j = super::_greedyIDs.at(i);
-    const double invP = 1.0 / _choleskyA(i, i); // TODO: _basisMatrix(j, i)?
+    const double invP = 1.0 / _basisMatrix(i, i);
     const Eigen::RowVectorXd newtonCoefficient = residual.row(j) * invP;
     residual -= _basisMatrix.col(i) * newtonCoefficient;
   }
-
   return residual;
 }
 
