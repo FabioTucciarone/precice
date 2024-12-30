@@ -61,6 +61,13 @@ protected:
   std::vector<int>    _greedyIDs;
   std::array<bool, 3> _activeAxis;
 
+  // nicht von allen verwendet:
+  // Eigen::MatrixXd _basisMatrix;
+  // Eigen::MatrixXd _choleskyA;
+  // Eigen::MatrixXd _invCholeskyA;
+  // Eigen::MatrixXd _interpolationCoeffs;
+
+  // von allen verwendet:
   Eigen::MatrixXd _kernelEval;
   Eigen::MatrixXd _polyMatrixQ;
   Eigen::MatrixXd _polyMatrixU;
@@ -68,6 +75,7 @@ protected:
   Eigen::ColPivHouseholderQR<Eigen::MatrixXd> _qrDecomposedQ;
 
   std::pair<int, double> select(const Eigen::VectorXd &powerFunction) const;
+  std::pair<int, double> select(const Eigen::MatrixXd &residual) const;
 
   void fillEvaluationMatrix(size_t n0);
   void fillPolynomialMatrices();
@@ -197,6 +205,13 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::VectorXd &powerFunction) const {
   Eigen::Index maxIndex;
   double       maxValue = powerFunction.maxCoeff(&maxIndex);
+  return {maxIndex, maxValue};
+}
+
+template <typename RADIAL_BASIS_FUNCTION_T>
+std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::MatrixXd &residual) const {
+  Eigen::Index maxIndex;
+  double       maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
   return {maxIndex, maxValue};
 }
 

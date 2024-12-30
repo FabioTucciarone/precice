@@ -26,9 +26,11 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 class PGreedyCholeskyMapping : public GreedyMapping<RADIAL_BASIS_FUNCTION_T> {
 
   using RadialBasisFctBaseMapping<RADIAL_BASIS_FUNCTION_T>::_basisFunction;
-  using GreedyMapping<RADIAL_BASIS_FUNCTION_T>::_log;
   using super = GreedyMapping<RADIAL_BASIS_FUNCTION_T>;
   using GreedyParameter = MappingConfiguration::GreedyParameter;
+
+  using super::_log;
+  using super::_greedyIDs;
 
 public:
 
@@ -96,7 +98,7 @@ void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
       super::calculateIncreasedNumberOfCenters();
       _basisMatrix.conservativeResize(super::_inSize, super::_basisSize);
     }
-    super::_greedyIDs.push_back(i);
+    _greedyIDs.push_back(i);
 
     super::updateKernelVector(x, boost::irange(0UL, super::_inSize), basisVector);
     basisVector -= _basisMatrix.block(0, 0, super::_inSize, n) * _basisMatrix.block(i, 0, 1, n).transpose();
@@ -111,7 +113,7 @@ void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 
   PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.");
 
-  _choleskyA   =  _basisMatrix(super::_greedyIDs, Eigen::seqN(0, super::_greedyIDs.size()));
+  _choleskyA   =  _basisMatrix(_greedyIDs, Eigen::seqN(0, _greedyIDs.size()));
   _basisMatrix = Eigen::MatrixXd();
 
   super::fillEvaluationMatrix(0);

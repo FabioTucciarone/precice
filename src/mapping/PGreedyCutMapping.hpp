@@ -25,9 +25,11 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 class PGreedyCutMapping : public GreedyMapping<RADIAL_BASIS_FUNCTION_T> {
 
   using RadialBasisFctBaseMapping<RADIAL_BASIS_FUNCTION_T>::_basisFunction;
-  using GreedyMapping<RADIAL_BASIS_FUNCTION_T>::_log;
   using GreedyParameter = MappingConfiguration::GreedyParameter;
   using super = GreedyMapping<RADIAL_BASIS_FUNCTION_T>;
+
+  using super::_log;
+  using super::_greedyIDs;
 
 public:
 
@@ -114,15 +116,15 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
     }
     const double invP = 1.0 / std::sqrt(pMax);
 
-    super::updateKernelVector(x, super::_greedyIDs, kernelVector);
+    super::updateKernelVector(x, _greedyIDs, kernelVector);
     basisVector.head(n) = _cut.block(0, 0, n, n).triangularView<Eigen::Lower>() * kernelVector.head(n);
 
     _cut.block(n, 0, 1, n).noalias() = -basisVector.block(0, 0, n, 1).transpose() * _cut.block(0, 0, n, n).triangularView<Eigen::Lower>();
     _cut(n, n)                       = 1;
     _cut.block(n, 0, 1, n + 1) *= invP;
 
-    super::_greedyIDs.push_back(i);
-    updatePowerFunction(x, super::_greedyIDs);
+    _greedyIDs.push_back(i);
+    updatePowerFunction(x, _greedyIDs);
 
     PRECICE_DEBUG("Iteration: {}, pMax = {}", n + 1, pMax);
   }
