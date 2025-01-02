@@ -30,6 +30,7 @@ class PGreedyCutMapping : public GreedyMapping<RADIAL_BASIS_FUNCTION_T> {
 
   using super::_log;
   using super::_greedyIDs;
+  using super::_invCholeskyA;
 
 public:
 
@@ -53,7 +54,6 @@ public:
 
 private:
   Eigen::MatrixXd _kernelMatrix;
-  Eigen::MatrixXd _cut;
   Eigen::VectorXd _powerFunction;
 
   void updatePowerFunction(const mesh::Vertex &x, const std::vector<int> &greedyIDs);
@@ -79,7 +79,7 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::updatePowerFunction(const mesh:
     const auto &y       = super::_inputMesh->vertices().at(j).rawCoords();
     _kernelMatrix(j, n) = _basisFunction.evaluate(std::sqrt(computeSquaredDifference(y, x.rawCoords(), super::_activeAxis)));
   }
-  _powerFunction -= (Eigen::VectorXd)(_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _cut.block(n, 0, 1, n + 1).transpose()).array().square();
+  _powerFunction -= (Eigen::VectorXd)(_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()).array().square();
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -89,7 +89,7 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 
   super::computeMapping();
 
-  _cut           = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize);
+  _invCholeskyA  = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize);
   _powerFunction = Eigen::VectorXd(super::_inSize);
   _kernelMatrix  = Eigen::MatrixXd::Zero(super::_inSize, super::_basisSize);
   _powerFunction.fill(_basisFunction.evaluate(0));
@@ -108,8 +108,8 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
         break;
       super::calculateIncreasedNumberOfCenters();
       _kernelMatrix.conservativeResize(super::_inSize, super::_basisSize);
-      _cut.conservativeResize(super::_basisSize, super::_basisSize);
-      _cut.block(0, n + 1, super::_basisSize, super::_basisSize - n - 1) = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize - n - 1);
+      _invCholeskyA.conservativeResize(super::_basisSize, super::_basisSize);
+      _invCholeskyA.block(0, n + 1, super::_basisSize, super::_basisSize - n - 1) = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize - n - 1);
       kernelVector.conservativeResize(super::_basisSize);
       basisVector.conservativeResize(super::_basisSize);
       PRECICE_DEBUG("Resizing matrices.");
@@ -117,11 +117,11 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
     const double invP = 1.0 / std::sqrt(pMax);
 
     super::updateKernelVector(x, _greedyIDs, kernelVector);
-    basisVector.head(n) = _cut.block(0, 0, n, n).triangularView<Eigen::Lower>() * kernelVector.head(n);
+    basisVector.head(n) = _invCholeskyA.block(0, 0, n, n).template triangularView<Eigen::Lower>() * kernelVector.head(n);
 
-    _cut.block(n, 0, 1, n).noalias() = -basisVector.block(0, 0, n, 1).transpose() * _cut.block(0, 0, n, n).triangularView<Eigen::Lower>();
-    _cut(n, n)                       = 1;
-    _cut.block(n, 0, 1, n + 1) *= invP;
+    _invCholeskyA.block(n, 0, 1, n).noalias() = -basisVector.block(0, 0, n, 1).transpose() * _invCholeskyA.block(0, 0, n, n).template triangularView<Eigen::Lower>();
+    _invCholeskyA(n, n)                       = 1;
+    _invCholeskyA.block(n, 0, 1, n + 1) *= invP;
 
     _greedyIDs.push_back(i);
     updatePowerFunction(x, _greedyIDs);
@@ -142,14 +142,14 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
   
   precice::profiling::Event e("map.P-greedy-cut.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
-  super::solveConsistentWithCut(inData, _cut, outData);
+  super::solveConsistentWithCut(inData, _invCholeskyA, outData);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
 
   precice::profiling::Event e("map.P-greedy-cut.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
-  super::solveConservativeWithCut(inData, _cut, outData);
+  super::solveConservativeWithCut(inData, _invCholeskyA, outData);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -161,7 +161,7 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::clear() {
   super::clear();
   _kernelMatrix = Eigen::MatrixXd();
-  _cut          = Eigen::MatrixXd();
+  _invCholeskyA          = Eigen::MatrixXd();
 }
 
 } // namespace mapping

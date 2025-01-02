@@ -19,9 +19,6 @@
 #include <fstream>
 
 
-#define PRINT_FULL_OUTPUT false
-
-
 namespace precice {
 namespace mapping {
 
@@ -34,6 +31,8 @@ class FGreedyCholeskyMapping : public GreedyMapping<RADIAL_BASIS_FUNCTION_T> {
 
   using super::_log;
   using super::_greedyIDs;
+  using super::_invCholeskyA;
+  using super::_referenceResidualNorm;
 
 public:
 
@@ -58,19 +57,13 @@ public:
 private:
   Eigen::MatrixXd _basisMatrix;
   Eigen::MatrixXd _choleskyA;
-  Eigen::MatrixXd _invCholeskyA;
-  Eigen::MatrixXd _interpolationCoeffs;
 
-  double _referenceResidualNorm;
-
-  void updateInterpolationMatrices(const Eigen::MatrixXd &y);
-  void buildInterpolationMatrices(const Eigen::MatrixXd &residual0, const size_t n0);
+  virtual void updateInterpolationMatrices(const Eigen::MatrixXd &y) override;
+  virtual void buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &startResidual, const size_t startIndex) override;
   void updateInverse(size_t n0);
 
-  void exchange(const Eigen::MatrixXd &y, size_t removealN);
   void reorderBasis(const Eigen::MatrixXd &y, const size_t removealN);
-
-  Eigen::MatrixXd recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend);
+  virtual Eigen::MatrixXd recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend) override;
 };
 
 
@@ -92,21 +85,24 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   precice::profiling::Event e("map.f-greedy.computeMapping", profiling::Synchronize);
 
   super::computeMapping();
+  _invCholeskyA = Eigen::MatrixXd();
   _basisMatrix.resize(super::_inSize, super::_basisSize);
 
   this->_hasComputedMapping = true;
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &r0, const size_t n0) {
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &startResidual, const size_t startIndex) {
 
   Eigen::VectorXd basisVector(super::_inSize);
-  Eigen::MatrixXd residual = r0; // TODO: copy necessary?
-  size_t initialN = _greedyIDs.size();
-  _greedyIDs.erase(_greedyIDs.begin() + n0, _greedyIDs.end()); // n0 = 0 => Recalc everything
+  Eigen::MatrixXd residual = startResidual; // TODO: copy necessary?
+  size_t initialSize = _greedyIDs.size();
+
+  // Erase indices that should be reselected: startIndex, ..., n-1
+  _greedyIDs.erase(_greedyIDs.begin() + startIndex, _greedyIDs.end());
 
   // Iterative selection of new points
-  for (size_t n = n0; n < super::_maxIter; ++n) {
+  for (size_t n = startIndex; n < super::_maxIter; ++n) {
 
     const auto [i, fMax] = super::select(residual);
     const auto x         = super::_inputMesh->vertices().at(i);
@@ -127,102 +123,62 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices
     basisVector *= invP;
     _basisMatrix.col(n) = basisVector;
 
-    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP; // temp alloc
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP;
     residual -= basisVector * newtonCoefficient;
   }
 
   PRECICE_INFO("Finished greedy search. Reordering cholesky matrix.", _greedyIDs.size());
 
-  _choleskyA = _basisMatrix(_greedyIDs, Eigen::seqN(0, _greedyIDs.size())); //TODO: =
-
+  _choleskyA = _basisMatrix(_greedyIDs, Eigen::seqN(0, _greedyIDs.size()));
   _referenceResidualNorm = residual.squaredNorm();
-  int difference = int(_greedyIDs.size()) - int(initialN);
-  double removalPercentage = float(initialN - n0) / initialN * 100;
-  removalPercentage = (removalPercentage != removalPercentage) ? 0 : removalPercentage; // replace NaN with 0%
+  super::printFGreedyConclusion(initialSize, startIndex);
 
-  PRECICE_INFO("Number of centers used now: {}, in previouse time step: {} (removed {}% in exchange-step, added {} in greedy-step)\n",
-    _greedyIDs.size(), initialN, removalPercentage, difference
-  );
-
-  super::fillEvaluationMatrix(n0);
-  updateInverse(n0);
-}
-
-
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, size_t removalN) {
-
-  size_t n = _greedyIDs.size();
-  Eigen::MatrixXd _partialInverseA = Eigen::MatrixXd::Zero(2 * removalN - 1, 2 * removalN - 1);
-
-  _interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all);
-  _interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * _interpolationCoeffs;
-
-  double minResidualNorm = std::numeric_limits<double>::max();
-  double rebuildIndex = n;
-  size_t blockHeight = removalN;
-
-  for (size_t m = 0; m < n; m += blockHeight) {
-    if (m + 2 * removalN > n) blockHeight = n - m;
-    size_t blockLength = m + blockHeight;
-
-    _partialInverseA.block(0, 0, blockHeight, blockHeight) = _invCholeskyA.block(m, 0, blockHeight, blockLength) * _invCholeskyA.block(m, 0, blockHeight, blockLength).transpose();
-    double partialResidual = (_partialInverseA.block(0, 0, blockHeight, blockHeight).inverse() * _interpolationCoeffs.block(m, 0, blockHeight, _interpolationCoeffs.cols())).squaredNorm();
-
-    if (partialResidual <= minResidualNorm) {
-      minResidualNorm = partialResidual;
-      rebuildIndex = m;
-    }
-  }
-
-  if (rebuildIndex != n) {
-    buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
-  }
+  super::fillEvaluationMatrix(startIndex);
+  updateInverse(startIndex);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::MatrixXd &y, const size_t removalN) { 
 
-  size_t N = _greedyIDs.size();
+  size_t n = _greedyIDs.size();
 
-  Eigen::VectorXd basisVector = Eigen::VectorXd::Zero(N); // trotzedm alle Auswertungen benötigt
+  Eigen::VectorXd basisVector = Eigen::VectorXd::Zero(n);
   Eigen::MatrixXd residual = y(_greedyIDs, Eigen::all);
-  Eigen::MatrixXd localBasisMatrix = Eigen::MatrixXd::Zero(N, N); 
+  Eigen::MatrixXd localBasisMatrix = Eigen::MatrixXd::Zero(n, n); 
   std::vector<int> reorderedIDs;
-  reorderedIDs.reserve(N);
+  reorderedIDs.reserve(n);
 
-  for (size_t n = 0; n < N - removalN; ++n) {
+  for (size_t m = 0; m < n - removalN; ++m) {
 
+    // i: local index in reordered _greedyIDs-space, j: global index in _inputMesh-space
     const auto [i, fMax] = super::select(residual);
     const size_t j       = _greedyIDs.at(i);
     const auto   x       = super::_inputMesh->vertices().at(j);
 
     super::updateKernelVector(x, _greedyIDs, basisVector);
-    basisVector -= localBasisMatrix.block(0, 0, N, n) * localBasisMatrix.block(i, 0, 1, n).transpose();
-
-    reorderedIDs.push_back(j); // hinzufügen in globalem Raum
+    reorderedIDs.push_back(j);
+    basisVector -= localBasisMatrix.block(0, 0, N, m) * localBasisMatrix.block(i, 0, 1, m).transpose();
 
     const double invP = 1.0 / std::sqrt(basisVector(i));
     basisVector *= invP;
-    localBasisMatrix.col(n) = basisVector;
+    localBasisMatrix.col(m) = basisVector;
 
-    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP; // temp alloc
+    const Eigen::RowVectorXd newtonCoefficient = residual.row(i) * invP;
     residual -= basisVector * newtonCoefficient;
   }
 
-  size_t rebuildIndex = N;
-  for (size_t i = 0; i < N; i++) {
+  size_t rebuildIndex = n;
+  for (size_t i = 0; i < n; i++) {
     if (std::find(reorderedIDs.begin(), reorderedIDs.end(), _greedyIDs.at(i)) == reorderedIDs.end()) { 
       rebuildIndex = i;
       break;
     }
   }
 
-  if (rebuildIndex != N) {
-    buildInterpolationMatrices(recalculateResidual(y, rebuildIndex), rebuildIndex);
+  if (rebuildIndex != n) {
+    buildInterpolationMatrices(y, recalculateResidual(y, rebuildIndex), rebuildIndex);
   }
 }
-
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 Eigen::MatrixXd FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend) {
@@ -243,8 +199,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrice
   size_t n = _greedyIDs.size();
 
   if (n == 0) {
-    _invCholeskyA = Eigen::MatrixXd(); // for updateInverse(n0) TODO: verschieben
-    buildInterpolationMatrices(y, 0);
+    buildInterpolationMatrices(y, y, 0);
   } else {
     enum UpdateType {REBUILD_AT_TOLERANCE, REORDER_PARTIAL_REBUILD, EXCHANGE_PARTIAL_REBUILD}; // TODO: entfernen
     UpdateType updateType = UpdateType::EXCHANGE_PARTIAL_REBUILD;
@@ -254,11 +209,11 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrice
 
     switch (updateType) {
     case UpdateType::REBUILD_AT_TOLERANCE:
-      if (rebuildTolerance == 0) buildInterpolationMatrices(y, 0);
+      if (rebuildTolerance == 0) buildInterpolationMatrices(y, y, 0);
       else {
         const Eigen::MatrixXd residual = recalculateResidual(y, n);
         if (rebuildTolerance < residual.squaredNorm()) { 
-          buildInterpolationMatrices(residual, 0); 
+          buildInterpolationMatrices(y, residual, 0); 
         }
       }
       break;
@@ -266,7 +221,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrice
       reorderBasis(y, removalN);
       break;
     case UpdateType::EXCHANGE_PARTIAL_REBUILD:
-      exchange(y, removalN);
+      super::exchange(y, removalN);
       break;
     }
   }
@@ -283,53 +238,17 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateInverse(size_t n0) {
   }
   for (size_t i = n0; i < n; ++i) {
     const double invP = 1.0 / _choleskyA(i, i);
-    Eigen::RowVectorXd basisVector = _choleskyA.row(i); //TODO?
-    _invCholeskyA.block(i, 0, 1, i).noalias() = -basisVector.block(0, 0, 1, i) * _invCholeskyA.block(0, 0, i, i).triangularView<Eigen::Lower>();
+    _invCholeskyA.block(i, 0, 1, i).noalias() = -_choleskyA.row(i).block(0, 0, 1, i) * _invCholeskyA.block(0, 0, i, i).template triangularView<Eigen::Lower>();
     _invCholeskyA(i, i)                       = 1;
     _invCholeskyA.block(i, 0, 1, i + 1) *= invP;
   }
+  //_invCholeskyA = utils::invertLowerTriangularBlockwise(_choleskyA);
 }
 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
-
-  precice::profiling::Event mapConsistentEvent("map.f-greedy.computeMapping", profiling::Synchronize);
-  precice::profiling::Event updateEvent("map.f-greedy.computeMapping.update", profiling::Synchronize);
-
-  const Eigen::VectorXd &linearisedVectors = inData.values;
-  Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();
-
-  Eigen::MatrixXd polynomialCoeffs;
-  if (super::_usesPolynomial) {
-    super::fillPolynomialMatrices();
-    polynomialCoeffs = super::_qrDecomposedQ.solve(y);
-    y -= super::_polyMatrixQ * polynomialCoeffs;
-  }
-
-  updateInterpolationMatrices(y); // inverse nicht benötigt für erste Iteration
-
-  updateEvent.stop();
-
-  precice::profiling::Event solveEvent("map.f-greedy.computeMapping.solve", profiling::Synchronize);
-
-  size_t n = _greedyIDs.size();
-
-  //_invCholeskyA = utils::invertLowerTriangularBlockwise(_choleskyA);
-  _interpolationCoeffs = _invCholeskyA.block(0,0,n,n).triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all); //TODO: block for updateInverse(n0)
-  _interpolationCoeffs = _invCholeskyA.block(0,0,n,n).transpose().triangularView<Eigen::Upper>() * _interpolationCoeffs;
-
-  for (int d = 0; d < inData.dataDims; d++) {
-    outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) = super::_kernelEval.block(0, 0, n, super::_outSize).transpose() * _interpolationCoeffs.col(d);
-  }
-  if (super::_usesPolynomial) {
-    for (int d = 0; d < inData.dataDims; d++) {
-      outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) += super::_polyMatrixU * polynomialCoeffs.col(d);
-    }
-  }
-
-  solveEvent.stop();
-  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  super::solveConsistentFGreedy(inData, outData);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -339,7 +258,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd inputData = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();
-  updateInterpolationMatrices(inputData); // TODO: funktioniert nur, wenn _invCholeskyA aktualisiert wird
+  super::updateInterpolationMatrices(inputData);
   super::solveConservativeWithCholesky(inData, _choleskyA, outData);
 }
 
