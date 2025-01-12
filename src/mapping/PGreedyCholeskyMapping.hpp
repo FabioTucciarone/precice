@@ -75,7 +75,7 @@ PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::PGreedyCholeskyMapping(
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   
-  precice::profiling::Event e("map.P-greedy-cholesky.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.P-greedy.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   super::computeMapping();
   
@@ -128,14 +128,17 @@ void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
   
-  precice::profiling::Event e("map.P-greedy-cholesky.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event mapConsistentEvent("map.P-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   super::solveConsistentWithCholesky(inData, _choleskyA, outData);
+
+  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  mapConsistentEvent.addData("inSize", super::_inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
 
-  precice::profiling::Event e("map.P-greedy-cholesky.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.P-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   super::solveConservativeWithCholesky(inData, _choleskyA, outData);
 }
 

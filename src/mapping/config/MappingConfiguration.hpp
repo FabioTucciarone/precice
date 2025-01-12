@@ -50,9 +50,10 @@ public:
   };
 
   struct GreedyParameter {
-    std::string executor      = "reference-executor"; // TODO: modify to fit RadialBasisFctMapping::getName()
+    std::string executor      = "cpu";
     std::string solver        = "greedy-solver";
     std::string subType       = "P-cholesky";
+    std::string fUpdateMode   = "exchange";
     double      tolerance     = 1e-8;
     std::size_t maxIterations = 1e6;
   };

@@ -118,7 +118,7 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::updateResidual(const Eigen::Mat
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 
-  precice::profiling::Event e("map.f-greedy-cut.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.f-greedy.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   super::computeMapping();
   _invCholeskyA = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize);
@@ -186,7 +186,7 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sampl
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
 
-  precice::profiling::Event e("map.f-greedy-cut.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();

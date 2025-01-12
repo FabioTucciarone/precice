@@ -40,6 +40,7 @@
 #include "mapping/PGreedyCholeskyMapping.hpp"
 #include "mapping/PGreedyCutSolver.hpp"
 #include "mapping/PGreedyCutMapping.hpp"
+#include <regex>
 
 namespace precice::mapping {
 
@@ -262,7 +263,7 @@ MappingConfiguration::MappingConfiguration(
   auto attrMaxIterations = makeXMLAttribute(ATTR_MAX_ITERATIONS, 1e6)
                                .setDocumentation("Maximum number of iterations of the solver");
   auto attrgreedySubType = makeXMLAttribute(ATTR_GREEDY_SUBTYPE, "P-cholesky")
-                               .setDocumentation("Maximum number of iterations of the solver");
+                               .setDocumentation("The type of greedy selection to be applied.");
 
   auto verticesPerCluster = XMLAttribute<int>(ATTR_VERTICES_PER_CLUSTER, 50)
                                 .setDocumentation("Average number of vertices per cluster (partition) applied in the rbf partition of unity method.");
@@ -746,13 +747,16 @@ void MappingConfiguration::finishRBFConfiguration()
       _greedyParameter.tolerance     = _rbfConfig.solverRtol;
       _greedyParameter.maxIterations = _rbfConfig.maxIterations;
       _greedyParameter.executor      = _rbfConfig.greedySubType + "-cpu-executor";
+      _greedyParameter.fUpdateMode   = std::regex_replace(_rbfConfig.greedySubType, std::regex("^f-(cholesky|cut)-"), "");
+      _greedyParameter.fUpdateMode   = std::regex_replace(_greedyParameter.fUpdateMode, std::regex("^f-(cholesky|cut)-"), "");
+
       if (_rbfConfig.greedySubType == "P-cholesky") {
         mapping.mapping = getRBFMapping<RBFBackend::PGreedyCholesky>(_rbfConfig.basisFunction, constraintValue, mapping.fromMesh->getDimensions(), _rbfConfig.supportRadius, _rbfConfig.shapeParameter, _rbfConfig.deadAxis, _rbfConfig.polynomial, _greedyParameter);
       } else if (_rbfConfig.greedySubType == "P-cut") {
         mapping.mapping = getRBFMapping<RBFBackend::PGreedyCut>(_rbfConfig.basisFunction, constraintValue, mapping.fromMesh->getDimensions(), _rbfConfig.supportRadius, _rbfConfig.shapeParameter, _rbfConfig.deadAxis, _rbfConfig.polynomial, _greedyParameter);
-      } else if (_rbfConfig.greedySubType == "f-cholesky") {
+      } else if (_rbfConfig.greedySubType.find("f-cholesky") != std::string::npos) {
         mapping.mapping = getRBFMapping<RBFBackend::FGreedyCholesky>(_rbfConfig.basisFunction, constraintValue, mapping.fromMesh->getDimensions(), _rbfConfig.supportRadius, _rbfConfig.shapeParameter, _rbfConfig.deadAxis, _rbfConfig.polynomial, _greedyParameter);
-      } else if (_rbfConfig.greedySubType == "f-cut") {
+      } else if (_rbfConfig.greedySubType.find("f-cut") != std::string::npos) {
         mapping.mapping = getRBFMapping<RBFBackend::FGreedyCut>(_rbfConfig.basisFunction, constraintValue, mapping.fromMesh->getDimensions(), _rbfConfig.supportRadius, _rbfConfig.shapeParameter, _rbfConfig.deadAxis, _rbfConfig.polynomial, _greedyParameter);
       } else {
         PRECICE_UNREACHABLE("Unknown greedy subtype.");

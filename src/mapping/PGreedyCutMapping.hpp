@@ -85,7 +85,7 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::updatePowerFunction(const mesh:
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 
-  precice::profiling::Event e("map.P-greedy-cut.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.P-greedy.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   super::computeMapping();
 
@@ -141,14 +141,17 @@ void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
   
-  precice::profiling::Event e("map.P-greedy-cut.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event mapConsistentEvent("map.P-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   super::solveConsistentWithCut(inData, _invCholeskyA, outData);
+
+  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  mapConsistentEvent.addData("inSize", super::_inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void PGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
 
-  precice::profiling::Event e("map.P-greedy-cut.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event e("map.P-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   super::solveConservativeWithCut(inData, _invCholeskyA, outData);
 }
 

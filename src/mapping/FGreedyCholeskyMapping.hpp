@@ -58,7 +58,7 @@ private:
   Eigen::MatrixXd _basisMatrix;
   Eigen::MatrixXd _choleskyA;
 
-  virtual void updateInterpolationMatrices(const Eigen::MatrixXd &y) override;
+  void updateReorderRemove(const Eigen::MatrixXd &y);
   virtual void buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &startResidual, const size_t startIndex) override;
   void updateInverse(size_t n0);
 
@@ -82,7 +82,7 @@ FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::FGreedyCholeskyMapping(
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
 
-  precice::profiling::Event e("map.f-greedy.computeMapping", profiling::Synchronize);
+  precice::profiling::Event e("map.f-greedy.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   super::computeMapping();
   _invCholeskyA = Eigen::MatrixXd();
@@ -157,7 +157,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::reorderBasis(const Eigen::
 
     super::updateKernelVector(x, _greedyIDs, basisVector);
     reorderedIDs.push_back(j);
-    basisVector -= localBasisMatrix.block(0, 0, N, m) * localBasisMatrix.block(i, 0, 1, m).transpose();
+    basisVector -= localBasisMatrix.block(0, 0, n, m) * localBasisMatrix.block(i, 0, 1, m).transpose();
 
     const double invP = 1.0 / std::sqrt(basisVector(i));
     basisVector *= invP;
@@ -195,35 +195,14 @@ Eigen::MatrixXd FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResi
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrices(const Eigen::MatrixXd &y) {
+void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::updateReorderRemove(const Eigen::MatrixXd &y) {
   size_t n = _greedyIDs.size();
 
   if (n == 0) {
     buildInterpolationMatrices(y, y, 0);
   } else {
-    enum UpdateType {REBUILD_AT_TOLERANCE, REORDER_PARTIAL_REBUILD, EXCHANGE_PARTIAL_REBUILD}; // TODO: entfernen
-    UpdateType updateType = UpdateType::EXCHANGE_PARTIAL_REBUILD;
-
-    double rebuildTolerance = 10 * _referenceResidualNorm;
-    int removalN = static_cast<int>(std::round(std::max(0.01 * n, 1.0))); // TODO: überdenken
-
-    switch (updateType) {
-    case UpdateType::REBUILD_AT_TOLERANCE:
-      if (rebuildTolerance == 0) buildInterpolationMatrices(y, y, 0);
-      else {
-        const Eigen::MatrixXd residual = recalculateResidual(y, n);
-        if (rebuildTolerance < residual.squaredNorm()) { 
-          buildInterpolationMatrices(y, residual, 0); 
-        }
-      }
-      break;
-    case UpdateType::REORDER_PARTIAL_REBUILD:
-      reorderBasis(y, removalN);
-      break;
-    case UpdateType::EXCHANGE_PARTIAL_REBUILD:
-      super::exchange(y, removalN);
-      break;
-    }
+    int removalN = static_cast<int>(std::round(std::max(0.01 * n, 1.0)));
+    reorderBasis(y, removalN);
   }
 }
 
@@ -254,7 +233,7 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::
 template <typename RADIAL_BASIS_FUNCTION_T>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
 
-  precice::profiling::Event e("map.f-greedy-cholesky.mapData", profiling::Synchronize);
+  precice::profiling::Event e("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd inputData = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();

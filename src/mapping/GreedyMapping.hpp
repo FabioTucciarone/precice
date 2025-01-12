@@ -75,6 +75,9 @@ protected:
   /// Residual of the last mapping. Used by the f-greedy methods and updated in buildInterpolationMatrices(). Might be used to decide whether to rebuild or not.
   double _referenceResidualNorm;
 
+  enum UpdateMode {REBUILD, REBUILD_AT_TOLERANCE, EXCHANGE, EXCHANGE_AT_TOLERANCE}; // TODO: entfernen
+  UpdateMode _updateMode = UpdateMode::EXCHANGE;
+
   /**
    * @brief select the next greedy-center.
    * @return Pair consisting of the input mesh index and the maximum value of the greedy criterion.
@@ -84,7 +87,7 @@ protected:
   /**
    * @brief select the next greedy-center.
    * 
-   * This implementation calculates the l2-norm of the rows of the input and finds the maximum.
+   * This implementation calculates the square-norm of the rows of the input and finds the maximum.
    * 
    * @return Pair consisting of the input mesh index and the maximum value of the greedy criterion.
    */
@@ -175,7 +178,13 @@ GreedyMapping<RADIAL_BASIS_FUNCTION_T>::GreedyMapping(
   _usesPolynomial = (polynomial == Polynomial::SEPARATE);
 
   _tolerance = greedyParameter.tolerance;
-  _maxIter   = greedyParameter.maxIterations;
+  _maxIter   = greedyParameter.maxIterations; // later: _maxIter := max(_inSize, _maxIter)
+
+  if (greedyParameter.fUpdateMode == "exchange") _updateMode = UpdateMode::EXCHANGE;
+  else if (greedyParameter.fUpdateMode == "tolerance-rebuild") _updateMode = UpdateMode::REBUILD_AT_TOLERANCE;
+  else if (greedyParameter.fUpdateMode == "tolerance-exchange") _updateMode = UpdateMode::EXCHANGE_AT_TOLERANCE;
+  else _updateMode = UpdateMode::REBUILD;
+  PRECICE_INFO("f-greedy update mode is \"{}\"", greedyParameter.fUpdateMode);
 
   _activeAxis = std::array<bool, 3>({{false, false, false}});
   std::transform(deadAxis.begin(), deadAxis.end(), _activeAxis.begin(), [](const auto ax) { return !ax; });
@@ -230,12 +239,12 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateKernelVector(const mesh::Vert
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 size_t GreedyMapping<RADIAL_BASIS_FUNCTION_T>::estimateNumberOfCenters() {
-  return static_cast<size_t>(0.1 * _maxIter + 1);
+  return static_cast<size_t>(0.1 * _inSize + 1);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::calculateIncreasedNumberOfCenters() {
-  _basisSize = _basisSize + std::min(_maxIter, static_cast<size_t>(0.1 * _maxIter + 1));
+  _basisSize = _basisSize + std::min(_inSize, static_cast<size_t>(0.1 * _inSize + 1));
   PRECICE_INFO("Resizing matrices to {}% ({}) of centers.", static_cast<size_t>((float(_basisSize) / float(_inSize)) * 100), _basisSize);
 }
 
@@ -270,7 +279,7 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::MatrixXd &residual) const {
   Eigen::Index maxIndex;
   double       maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
-  return {maxIndex, std::sqrt(maxValue)};
+  return {maxIndex, maxValue};
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -414,8 +423,8 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::Sample &inData, Eigen::VectorXd &outData) {
   PRECICE_ASSERT(_greedyIDs.size() <= size_t(_invCholeskyA.cols()));
 
-  precice::profiling::Event mapConsistentEvent("map.f-greedy.computeMapping", profiling::Synchronize);
-  precice::profiling::Event updateEvent("map.f-greedy.computeMapping.update", profiling::Synchronize);
+  precice::profiling::Event mapConsistentEvent("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event updateEvent("map.f-greedy.update", profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, _inSize).transpose();
@@ -432,7 +441,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
 
   updateEvent.stop();
 
-  precice::profiling::Event solveEvent("map.f-greedy.computeMapping.solve", profiling::Synchronize);
+  precice::profiling::Event solveEvent("map.f-greedy.solve", profiling::Synchronize);
 
   size_t n = _greedyIDs.size();
 
@@ -450,6 +459,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
 
   solveEvent.stop();
   mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  mapConsistentEvent.addData("inSize", _inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -458,7 +468,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Ei
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-Eigen::MatrixXd GreedyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, const size_t rebuildIndex) { 
+Eigen::MatrixXd GreedyMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, const size_t basisExtent) { 
   PRECICE_ASSERT(false, "Not implemented!"); 
 }
 
@@ -469,7 +479,31 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrices(const E
     buildInterpolationMatrices(y, y, 0);
   } else {
     int removalN = static_cast<int>(std::round(std::max(0.01 * n, 1.0))); // TODO: überdenken; min 1
-    exchange(y, removalN);
+
+    switch (_updateMode) {
+      case UpdateMode::EXCHANGE: {
+        exchange(y, removalN);
+        break;
+      }
+      case UpdateMode::REBUILD_AT_TOLERANCE: {
+        double residualNorm = recalculateResidual(y, n).squaredNorm();
+        if (residualNorm > 2 * _referenceResidualNorm) {
+          buildInterpolationMatrices(y, y, 0);
+        }
+        break;
+      }
+      case UpdateMode::EXCHANGE_AT_TOLERANCE: {
+        double residualNorm = recalculateResidual(y, n).squaredNorm();
+        if (residualNorm > 2 * _referenceResidualNorm) {
+          exchange(y, removalN);
+        }
+        break;
+      }
+      default: {
+        buildInterpolationMatrices(y, y, 0);
+        break;
+      }
+    }
   }
 }
 
