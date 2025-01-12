@@ -35,10 +35,7 @@
 #include "mapping/GreedyMapping.hpp"
 #include "mapping/FGreedyCholeskyMapping.hpp"
 #include "mapping/FGreedyCutMapping.hpp"
-#include "mapping/FGreedyCutSolver.hpp"
-#include "mapping/PGreedyCholeskySolver.hpp"
 #include "mapping/PGreedyCholeskyMapping.hpp"
-#include "mapping/PGreedyCutSolver.hpp"
 #include "mapping/PGreedyCutMapping.hpp"
 #include <regex>
 
