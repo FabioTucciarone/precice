@@ -18,10 +18,13 @@
 #include <iostream>
 #include <fstream>
 
+#define F_GREEDY 1
+#define P_GREEDY 0
+
 namespace precice {
 namespace mapping {
 
-template <typename RADIAL_BASIS_FUNCTION_T>
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 class FGreedyCutMapping : public GreedyMapping<RADIAL_BASIS_FUNCTION_T> {
 
   using RadialBasisFctBaseMapping<RADIAL_BASIS_FUNCTION_T>::_basisFunction;
@@ -55,17 +58,20 @@ public:
 
 private:
   Eigen::MatrixXd _kernelMatrix;
+  Eigen::VectorXd _powerFunction;
 
-  void updateResidual(const Eigen::MatrixXd &y, Eigen::MatrixXd &residual);
+  void updateResidual(Eigen::MatrixXd &residual, const Eigen::MatrixXd &y);
   void addKernelMatrixColumn(const size_t greedyIndex);
+
+  void updatePowerFunction(Eigen::VectorXd &powerFunction, const mesh::Vertex &x);
 
   virtual void buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &r0, const size_t n0) override;
   virtual Eigen::MatrixXd recalculateResidual(const Eigen::MatrixXd &y, const size_t basisExtend) override;
 };
 
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::FGreedyCutMapping(
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::FGreedyCutMapping(
     Mapping::Constraint     constraint,
     int                     dimensions,
     RADIAL_BASIS_FUNCTION_T function,
@@ -76,8 +82,8 @@ FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::FGreedyCutMapping(
 { }
 
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::addKernelMatrixColumn(const size_t greedyIndex) {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::addKernelMatrixColumn(const size_t greedyIndex) {
 
   const mesh::Mesh::VertexContainer &inputVertices = super::_inputMesh->vertices();
 
@@ -92,9 +98,21 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::addKernelMatrixColumn(const siz
 }
 
 
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updatePowerFunction(Eigen::VectorXd &powerFunction, const mesh::Vertex &x) {
+
+  const size_t n = _greedyIDs.size() - 1;
+  for (size_t j = 0; j < super::_inSize; j++) {
+    const auto &y       = super::_inputMesh->vertices().at(j).rawCoords();
+    _kernelMatrix(j, n) = _basisFunction.evaluate(std::sqrt(computeSquaredDifference(y, x.rawCoords(), super::_activeAxis)));
+  }
+  powerFunction -= (Eigen::VectorXd)(_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()).array().square();
+}
+
+
 // basisExtend = rebuild Index: nr Centers to use = n0 ## ## with Coeffs teste für basisExtend == 0
-template <typename RADIAL_BASIS_FUNCTION_T>
-Eigen::MatrixXd FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(const Eigen::MatrixXd &y, const size_t basisExtend) {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+Eigen::MatrixXd FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::recalculateResidual(const Eigen::MatrixXd &y, const size_t basisExtend) {
   PRECICE_ASSERT(basisExtend <= _greedyIDs.size());
 
   const Eigen::MatrixXd Cy = _invCholeskyA.block(0, 0, basisExtend, basisExtend).template triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all).block(0, 0, basisExtend, y.cols());
@@ -104,36 +122,44 @@ Eigen::MatrixXd FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::recalculateResidual(
 
 
 // n0 = nr Greedy Centers to use - 1 ## ## updateResidualAndCoeffs
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::updateResidual(const Eigen::MatrixXd &y, Eigen::MatrixXd &residual) {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updateResidual(Eigen::MatrixXd &residual, const Eigen::MatrixXd &y) {
   PRECICE_ASSERT(!_greedyIDs.empty());
 
   const size_t n = _greedyIDs.size() - 1;
-  const Eigen::MatrixXd cy = _invCholeskyA.block(n, 0, 1, n + 1) * y(_greedyIDs, Eigen::all);
+  const Eigen::MatrixXd cy = _invCholeskyA.block(n, 0, 1, n + 1) * y(_greedyIDs, Eigen::all); // ersetze mit <_invCholeskyA.block(n, 0, 1, n + 1), _invCholeskyA.block(n, 0, 1, n + 1)>
   residual -= (_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()) * cy;
-  //_interpolationCoeffs.block(0, 0, n + 1, y.cols()) += _invCholeskyA.block(n, 0, 1, n + 1).transpose() * cy;
-  //residual = y - (_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _interpolationCoeffs.block(0, 0, n + 1, y.cols()));
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::computeMapping() {
 
   precice::profiling::Event e("map.f-greedy.computeMapping.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   super::computeMapping();
+  
   _invCholeskyA = Eigen::MatrixXd::Zero(super::_basisSize, super::_basisSize);
   _kernelMatrix = Eigen::MatrixXd::Zero(super::_inSize, super::_basisSize);
+  if constexpr (BETA != F_GREEDY) {
+    buildInterpolationMatrices(Eigen::MatrixXd(), Eigen::MatrixXd(), 0);
+  }
+
   this->_hasComputedMapping = true;
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T> // beginne erneut bei Index n0 (= behalte n0 Zentren)
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &r0, const size_t startIndex) {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA> // beginne erneut bei Index n0 (= behalte n0 Zentren)
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &r0, const size_t startIndex) {
 
+  size_t initialSize = _greedyIDs.size();
+  Eigen::VectorXd powerFunction;
   Eigen::MatrixXd residual               = r0;
   Eigen::VectorXd kernelVectorOldCenters = Eigen::VectorXd::Ones(super::_basisSize);
   Eigen::VectorXd basisVector            = Eigen::VectorXd::Ones(super::_basisSize); // max(super::_basisSize, initialN)
 
-   size_t initialSize = _greedyIDs.size();
+  if constexpr (BETA != F_GREEDY) {
+    powerFunction = Eigen::VectorXd(super::_inSize);
+    powerFunction.fill(_basisFunction.evaluate(0));
+  }
   _greedyIDs.erase(_greedyIDs.begin() + startIndex, _greedyIDs.end()); // n0 = 0 => Recalc everything
 
   const double kernelDiagonal = _basisFunction.evaluate(0);
@@ -141,7 +167,7 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(cons
   // Iterative selection of new points
   for (size_t n = startIndex; n < super::_maxIter; ++n) {
 
-    const auto [i, fMax] = super::select(residual);
+    const auto [i, fMax] = this->template select<BETA>(residual, powerFunction);
     const auto x         = super::_inputMesh->vertices().at(i);
 
     super::updateKernelVector(x, _greedyIDs, kernelVectorOldCenters);
@@ -165,42 +191,53 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::buildInterpolationMatrices(cons
     _invCholeskyA(n, n)                       = 1;
     _invCholeskyA.block(n, 0, 1, n + 1) *= invP;
 
-    addKernelMatrixColumn(n);
-    updateResidual(y, residual);
+    if constexpr (BETA == F_GREEDY) {
+      addKernelMatrixColumn(n);
+      updateResidual(residual, y);
+    } else {
+      updatePowerFunction(powerFunction, x);
+    }
 
     PRECICE_DEBUG("Iteration: {}, fMax = {}\n", n + 1, fMax, squareP);
   }
-  _referenceResidualNorm = residual.squaredNorm();
-  super::printFGreedyConclusion(initialSize, startIndex);
-
+  if constexpr (BETA == F_GREEDY) {
+    _referenceResidualNorm = residual.squaredNorm();
+    super::printFGreedyConclusion(initialSize, startIndex);
+  }
   PRECICE_INFO("Finished greedy search and construction of inverse.");
 
   super::fillEvaluationMatrix(startIndex);
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
-  super::solveConsistentFGreedy(inData, outData);
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
+  if constexpr (BETA == F_GREEDY) {
+    super::solveConsistentFGreedy(inData, outData);
+  } else {
+    super::solveConsistentWithCut(inData, _invCholeskyA, outData);
+  }
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
-
-  precice::profiling::Event e("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
+  precice::profiling::Event solveEvent("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();
-  super::updateInterpolationMatrices(y);
+
+  if constexpr (BETA == F_GREEDY) {
+    super::updateInterpolationMatrices(y);
+  }
   super::solveConservativeWithCut(inData, _invCholeskyA, outData);
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-std::string FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::getName() const {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+std::string FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::getName() const {
   return "global-greedy RBF (f-cut-cpu-executor)";
 }
 
-template <typename RADIAL_BASIS_FUNCTION_T>
-void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T>::clear() {
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::clear() {
   super::clear();
   _kernelMatrix = Eigen::MatrixXd();
 }

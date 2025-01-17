@@ -82,7 +82,7 @@ protected:
    * @brief select the next greedy-center.
    * @return Pair consisting of the input mesh index and the maximum value of the greedy criterion.
    */
-  std::pair<int, double> select(const Eigen::VectorXd &powerFunction) const;
+  std::pair<int, double> select_(const Eigen::VectorXd &powerFunction) const;
 
   /**
    * @brief select the next greedy-center.
@@ -91,7 +91,10 @@ protected:
    * 
    * @return Pair consisting of the input mesh index and the maximum value of the greedy criterion.
    */
-  std::pair<int, double> select(const Eigen::MatrixXd &residual) const;
+  std::pair<int, double> select_(const Eigen::MatrixXd &residual) const;
+
+  template <int BETA>
+  std::pair<int, double> select(const Eigen::MatrixXd &residual, const Eigen::VectorXd &powerFunction) const;
 
   /**
    * @brief Fills and potentially resizes the _kernelEval matrix used to evaluate the model on the output mesh keeping the entries for centers 0, ..., startIndex-1.
@@ -266,20 +269,37 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   _maxIter   = std::min(_inSize, _maxIter); // max iterations must be smaller than or equal to the number of verticies
   _basisSize = estimateNumberOfCenters();
   _greedyIDs.reserve(_basisSize);
+
+  if (_usesPolynomial) {
+    fillPolynomialMatrices();
+  }
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::VectorXd &powerFunction) const {
+std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select_(const Eigen::VectorXd &powerFunction) const {
   Eigen::Index maxIndex;
   double       maxValue = powerFunction.maxCoeff(&maxIndex);
   return {maxIndex, maxValue};
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
-std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::MatrixXd &residual) const {
+std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select_(const Eigen::MatrixXd &residual) const {
   Eigen::Index maxIndex;
   double       maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
   return {maxIndex, maxValue};
+}
+
+template <typename RADIAL_BASIS_FUNCTION_T>
+template <int BETA>
+std::pair<int, double> GreedyMapping<RADIAL_BASIS_FUNCTION_T>::select(const Eigen::MatrixXd &residual, const Eigen::VectorXd &powerFunction) const {
+  Eigen::Index maxIndex;
+  if constexpr (BETA != 1) {
+    double maxValue = powerFunction.maxCoeff(&maxIndex);
+    return {maxIndex, maxValue};
+  } else {
+    double maxValue = residual.rowwise().squaredNorm().maxCoeff(&maxIndex);
+    return {maxIndex, maxValue};
+  }
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -344,6 +364,8 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, 
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConservativeWithCholesky(const time::Sample &inData, const Eigen::MatrixXd &choleskyA, Eigen::VectorXd &outData) const {
+  precice::profiling::Event mapConsistentEvent("map.greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+
   const Eigen::VectorXd &linearisedVectors = inData.values;
 
   const size_t          n = _greedyIDs.size();
@@ -364,10 +386,15 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConservativeWithCholesky(const
   for (int d = 0; d < inData.dataDims; d++) {
     outData(Eigen::seqN(d, _inSize, inData.dataDims)) = prediction.col(d);
   }
+
+  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  mapConsistentEvent.addData("inSize", _inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentWithCut(const time::Sample &inData, const Eigen::MatrixXd &cut, Eigen::VectorXd &outData) const {
+  precice::profiling::Event mapConsistentEvent("map.greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+
   const Eigen::VectorXd &linearisedVectors = inData.values;
 
   const size_t    n = _greedyIDs.size();
@@ -391,6 +418,9 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentWithCut(const time::
       outData(Eigen::seqN(d, _outSize, inData.dataDims)) += _polyMatrixU * polynomialCoeffs.col(d);
     }
   }
+
+  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
+  mapConsistentEvent.addData("inSize", _inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
@@ -431,7 +461,6 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
 
   Eigen::MatrixXd polynomialCoeffs;
   if (_usesPolynomial) {
-    fillPolynomialMatrices();
     polynomialCoeffs = _qrDecomposedQ.solve(y);
     y -= _polyMatrixQ * polynomialCoeffs;
   }

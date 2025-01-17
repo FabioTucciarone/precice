@@ -89,7 +89,7 @@ void PGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T>::computeMapping() {
   // Iterative selection of new points
   for (size_t n = 0; n < super::_maxIter; ++n) {
 
-    auto [i, pMax] = super::select(_powerFunction);
+    auto [i, pMax] = super::select_(_powerFunction);
     auto x         = super::_inputMesh->vertices().at(i);
 
     if (pMax < super::_tolerance || n == super::_basisSize) {

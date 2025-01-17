@@ -94,19 +94,19 @@ struct BackendSelector<RBFBackend::Eigen, RBF> {
 // Specialization for the RBF Greedy backend
 template <typename RBF>
 struct BackendSelector<RBFBackend::FGreedyCut, RBF> {
-  typedef mapping::FGreedyCutMapping<RBF> type;
+  typedef mapping::FGreedyCutMapping<RBF, 1> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::FGreedyCholesky, RBF> {
-  typedef mapping::FGreedyCholeskyMapping<RBF> type;
+  typedef mapping::FGreedyCholeskyMapping<RBF, 1> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::PGreedyCut, RBF> {
-  typedef mapping::PGreedyCutMapping<RBF> type;
+  typedef mapping::FGreedyCutMapping<RBF, 0> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::PGreedyCholesky, RBF> {
-  typedef mapping::PGreedyCholeskyMapping<RBF> type;
+  typedef mapping::FGreedyCholeskyMapping<RBF, 0> type;
 };
 
 // Specialization for the PETSc RBF backend
