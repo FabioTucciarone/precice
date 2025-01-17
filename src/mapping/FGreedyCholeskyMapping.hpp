@@ -249,11 +249,14 @@ void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updateInverse(size_t
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 void FGreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T, BETA>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
+  precice::profiling::Event mapConsistentEvent("map.greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   if constexpr (BETA == F_GREEDY) {
     super::solveConsistentFGreedy(inData, outData);
   } else {
     super::solveConsistentWithCholesky(inData, _choleskyA, outData);
   }
+  mapConsistentEvent.addData("basisSize", super::_greedyIDs.size());
+  mapConsistentEvent.addData("inSize", super::_inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>

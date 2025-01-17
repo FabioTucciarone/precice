@@ -211,16 +211,19 @@ void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::buildInterpolationMatrice
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::mapConsistent(const time::Sample &inData, Eigen::VectorXd &outData) {
+  precice::profiling::Event mapConsistentEvent("map.greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   if constexpr (BETA == F_GREEDY) {
     super::solveConsistentFGreedy(inData, outData);
   } else {
     super::solveConsistentWithCut(inData, _invCholeskyA, outData);
   }
+  mapConsistentEvent.addData("basisSize", super::_greedyIDs.size());
+  mapConsistentEvent.addData("inSize", super::_inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 void FGreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) {
-  precice::profiling::Event solveEvent("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
+  precice::profiling::Event solveEvent("map.greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
   Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_inSize).transpose();

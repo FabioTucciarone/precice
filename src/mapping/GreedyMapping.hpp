@@ -453,7 +453,6 @@ template <typename RADIAL_BASIS_FUNCTION_T>
 void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::Sample &inData, Eigen::VectorXd &outData) {
   PRECICE_ASSERT(_greedyIDs.size() <= size_t(_invCholeskyA.cols()));
 
-  precice::profiling::Event mapConsistentEvent("map.f-greedy.mapData.From" + this->input()->getName() + "To" + this->output()->getName(), profiling::Synchronize);
   precice::profiling::Event updateEvent("map.f-greedy.update", profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
@@ -487,8 +486,6 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
   }
 
   solveEvent.stop();
-  mapConsistentEvent.addData("basisSize", _greedyIDs.size());
-  mapConsistentEvent.addData("inSize", _inSize);
 }
 
 template <typename RADIAL_BASIS_FUNCTION_T>
