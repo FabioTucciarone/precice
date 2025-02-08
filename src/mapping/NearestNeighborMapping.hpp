@@ -22,7 +22,7 @@ public:
   /// name of the nn mapping
   std::string getName() const final override;
 
-protected:
+public:
   /// @copydoc Mapping::mapConservative
   void mapConservative(const time::Sample &inData, Eigen::VectorXd &outData) final override;
 

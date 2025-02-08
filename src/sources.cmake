@@ -176,10 +176,10 @@ target_sources(preciceCore
     src/mapping/AxialGeoMultiscaleMapping.hpp
     src/mapping/BarycentricBaseMapping.cpp
     src/mapping/BarycentricBaseMapping.hpp
-    src/mapping/FGreedyCholeskyMapping.hpp
-    src/mapping/FGreedyCutMapping.hpp
     src/mapping/GinkgoDefinitions.hpp
     src/mapping/GinkgoRadialBasisFctSolver.hpp
+    src/mapping/GreedyCholeskyMapping.hpp
+    src/mapping/GreedyCutMapping.hpp
     src/mapping/GreedyMapping.hpp
     src/mapping/LinearCellInterpolationMapping.cpp
     src/mapping/LinearCellInterpolationMapping.hpp
@@ -194,8 +194,6 @@ target_sources(preciceCore
     src/mapping/NearestNeighborMapping.hpp
     src/mapping/NearestProjectionMapping.cpp
     src/mapping/NearestProjectionMapping.hpp
-    src/mapping/PGreedyCholeskyMapping.hpp
-    src/mapping/PGreedyCutMapping.hpp
     src/mapping/PartitionOfUnityMapping.hpp
     src/mapping/PetRadialBasisFctMapping.hpp
     src/mapping/Polation.cpp

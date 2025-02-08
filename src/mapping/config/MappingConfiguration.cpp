@@ -33,10 +33,8 @@
 #include "xml/XMLTag.hpp"
 
 #include "mapping/GreedyMapping.hpp"
-#include "mapping/FGreedyCholeskyMapping.hpp"
-#include "mapping/FGreedyCutMapping.hpp"
-#include "mapping/PGreedyCholeskyMapping.hpp"
-#include "mapping/PGreedyCutMapping.hpp"
+#include "mapping/GreedyCholeskyMapping.hpp"
+#include "mapping/GreedyCutMapping.hpp"
 #include <regex>
 
 namespace precice::mapping {
@@ -94,19 +92,19 @@ struct BackendSelector<RBFBackend::Eigen, RBF> {
 // Specialization for the RBF Greedy backend
 template <typename RBF>
 struct BackendSelector<RBFBackend::FGreedyCut, RBF> {
-  typedef mapping::FGreedyCutMapping<RBF, 1> type;
+  typedef mapping::GreedyCutMapping<RBF, 1> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::FGreedyCholesky, RBF> {
-  typedef mapping::FGreedyCholeskyMapping<RBF, 1> type;
+  typedef mapping::GreedyCholeskyMapping<RBF, 1> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::PGreedyCut, RBF> {
-  typedef mapping::FGreedyCutMapping<RBF, 0> type;
+  typedef mapping::GreedyCutMapping<RBF, 0> type;
 };
 template <typename RBF>
 struct BackendSelector<RBFBackend::PGreedyCholesky, RBF> {
-  typedef mapping::FGreedyCholeskyMapping<RBF, 0> type;
+  typedef mapping::GreedyCholeskyMapping<RBF, 0> type;
 };
 
 // Specialization for the PETSc RBF backend
@@ -256,7 +254,7 @@ MappingConfiguration::MappingConfiguration(
 
   auto attrSolverRtol = makeXMLAttribute(ATTR_SOLVER_RTOL, 1e-9)
                             .setDocumentation("Solver relative tolerance for convergence");
-  // TODO: Discuss whether we wanto to introduce this attribute // TODO: Greedy
+  // TODO: Discuss whether we wanto to introduce this attribute (Currently used for rbf-greedy)
   auto attrMaxIterations = makeXMLAttribute(ATTR_MAX_ITERATIONS, 1e6)
                                .setDocumentation("Maximum number of iterations of the solver");
   auto attrgreedySubType = makeXMLAttribute(ATTR_GREEDY_SUBTYPE, "P-cholesky")
@@ -281,7 +279,7 @@ MappingConfiguration::MappingConfiguration(
   // Add the relevant attributes to the relevant tags
   addAttributes(projectionTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint});
   addAttributes(rbfDirectTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead});
-  addAttributes(rbfGreedyTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol, attrMaxIterations, attrgreedySubType}); // TODO: Hier Tag für Greedy Typen registrieren. //TODO: prüfe ob attrPolynomial, ... notwendig?
+  addAttributes(rbfGreedyTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol, attrMaxIterations, attrgreedySubType});
   addAttributes(rbfIterativeTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol});
   addAttributes(pumDirectTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPumPolynomial, verticesPerCluster, relativeOverlap, projectToInput});
   addAttributes(rbfAliasTag, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrXDead, attrYDead, attrZDead});
@@ -540,7 +538,7 @@ MappingConfiguration::RBFConfiguration MappingConfiguration::configureRBFMapping
     rbfConfig.solver = RBFConfiguration::SystemSolver::GlobalIterative;
   else if (type == TYPE_RBF_GLOBAL_DIRECT)
     rbfConfig.solver = RBFConfiguration::SystemSolver::GlobalDirect;
-  else if (type == TYPE_RBF_GREEDY) //TODO: Greedy-Typ Abfrage: Zuweisung zu Löser
+  else if (type == TYPE_RBF_GREEDY) 
     rbfConfig.solver = RBFConfiguration::SystemSolver::Greedy;
   else if (type == TYPE_RBF_PUM_DIRECT)
     rbfConfig.solver = RBFConfiguration::SystemSolver::PUMDirect;
