@@ -263,7 +263,6 @@ void testGreedyMappingDirection2(const std::string configFile, const TestContext
     double values[12];
     interface.readData(meshTwoID, dataAID, idsMeshTwo, maxDt, values);
 
-    // Due to Eigen 3.3.7 (Ubunu 2004) giving slightly different results
     for (int i = 0; i < 12; i++) {
       BOOST_TEST(values[i] == expectedValues[i], boost::test_tools::tolerance(1e-7));
     }

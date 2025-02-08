@@ -26,7 +26,7 @@
       polynomial="off"
       solver-rtol="0"
       z-dead="false"
-      greedy-type="P-cholesky">
+      greedy-type="P-cut">
       <!-- "P-cholesky", "P-cut", "f-cholesky", "f-cut" -->
       <basis-function:gaussian support-radius="2" />
     </mapping:rbf-greedy>
