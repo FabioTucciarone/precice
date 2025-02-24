@@ -276,11 +276,11 @@ void GreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T, BETA>::solveConsistent(const
   }
 
   Eigen::MatrixXd interpolationCoeffs = y(super::_greedyIDs, Eigen::all);
-  _choleskyA.triangularView<Eigen::Lower>().solveInPlace(interpolationCoeffs);
-  _choleskyA.transpose().triangularView<Eigen::Upper>().solveInPlace(interpolationCoeffs);
+  interpolationCoeffs = _choleskyA.triangularView<Eigen::Lower>().solve(interpolationCoeffs);
+  interpolationCoeffs = _choleskyA.transpose().triangularView<Eigen::Upper>().solve(interpolationCoeffs);
 
   for (int d = 0; d < inData.dataDims; d++) {
-    outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) =  super::_kernelEval.block(0, 0, _greedyIDs.size(), super::_outSize).transpose() * interpolationCoeffs.col(d);
+    outData(Eigen::seqN(d, super::_outSize, inData.dataDims)) = super::_kernelEval.block(0, 0, _greedyIDs.size(), super::_outSize).transpose() * interpolationCoeffs.col(d);
   }
   if (super::_usesPolynomial) {
     for (int d = 0; d < inData.dataDims; d++) {
@@ -299,8 +299,8 @@ void GreedyCholeskyMapping<RADIAL_BASIS_FUNCTION_T, BETA>::solveConservative(con
   const Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_outSize).transpose();
 
   Eigen::MatrixXd greedySolution = super::_kernelEval.block(0, 0, n, super::_outSize) * y;
-  _choleskyA.block(0, 0, n, n).triangularView<Eigen::Lower>().solveInPlace(greedySolution);
-  _choleskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>().solveInPlace(greedySolution);
+  greedySolution = _choleskyA.block(0, 0, n, n).triangularView<Eigen::Lower>().solve(greedySolution);
+  greedySolution = _choleskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>().solve(greedySolution);
 
   Eigen::MatrixXd prediction = Eigen::MatrixXd::Zero(super::_inSize, inData.dataDims);
   prediction(super::_greedyIDs, Eigen::all) = greedySolution;

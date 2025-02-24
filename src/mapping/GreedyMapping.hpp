@@ -387,7 +387,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrices(const E
   if (n == 0) {
     buildInterpolationMatrices(y, y, 0);
   } else {
-    int removalN = static_cast<int>(std::round(std::max(0.05 * n, 1.0)));
+    int removalN = static_cast<int>(std::round(std::max(0.01 * n, 1.0)));
 
     switch (_updateMode) {
       case UpdateMode::EXCHANGE: {
