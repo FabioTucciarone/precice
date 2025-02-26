@@ -56,6 +56,8 @@ public:
     std::string fUpdateMode   = "exchange";
     double      tolerance     = 1e-8;
     std::size_t maxIterations = 1e6;
+    double greedyRebuildDelta = 2;
+    double greedyRemovalSize  = 0.01;
   };
 
   MappingConfiguration(
@@ -144,7 +146,7 @@ private:
   const std::string TYPE_LINEAR_CELL_INTERPOLATION   = "linear-cell-interpolation";
   const std::string TYPE_RBF_GLOBAL_DIRECT           = "rbf-global-direct";
   const std::string TYPE_RBF_GLOBAL_ITERATIVE        = "rbf-global-iterative";
-  const std::string TYPE_RBF_GREEDY                  = "rbf-greedy"; // TODO: Geedy-Typ String Definition
+  const std::string TYPE_RBF_GREEDY                  = "rbf-greedy";
   const std::string TYPE_RBF_PUM_DIRECT              = "rbf-pum-direct";
   const std::string TYPE_RBF_ALIAS                   = "rbf";
   const std::string TYPE_AXIAL_GEOMETRIC_MULTISCALE  = "axial-geometric-multiscale";
@@ -175,6 +177,9 @@ private:
 
   // For iterative RBFs
   const std::string ATTR_SOLVER_RTOL = "solver-rtol";
+
+  const std::string ATTR_GREEDY_REMOVAL_SIZE = "removal-size";
+  const std::string ATTR_GREEDY_REBUILD_DELTA = "rebuild-delta";
 
   // For the future
   // const std::string ATTR_PARALLELISM           = "parallelism";

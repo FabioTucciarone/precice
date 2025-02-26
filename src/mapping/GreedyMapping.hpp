@@ -51,6 +51,8 @@ protected:
   bool   _usesPolynomial;
   double _tolerance;
   size_t _maxIter;
+  double _rebuildDelta;
+  double _removalSize;
 
   mesh::PtrMesh _inputMesh;
   mesh::PtrMesh _outputMesh;
@@ -182,6 +184,9 @@ GreedyMapping<RADIAL_BASIS_FUNCTION_T>::GreedyMapping(
   else if (greedyParameter.fUpdateMode == "tolerance-exchange") _updateMode = UpdateMode::EXCHANGE_AT_TOLERANCE;
   else _updateMode = UpdateMode::REBUILD;
   PRECICE_INFO("f-greedy update mode is \"{}\"", greedyParameter.fUpdateMode);
+
+  _rebuildDelta = greedyParameter.greedyRebuildDelta;
+  _removalSize  = greedyParameter.greedyRemovalSize;
 
   _activeAxis = std::array<bool, 3>({{false, false, false}});
   std::transform(deadAxis.begin(), deadAxis.end(), _activeAxis.begin(), [](const auto ax) { return !ax; });
@@ -387,7 +392,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrices(const E
   if (n == 0) {
     buildInterpolationMatrices(y, y, 0);
   } else {
-    int removalN = static_cast<int>(std::round(std::max(0.01 * n, 1.0)));
+    int removalN = static_cast<int>(std::round(std::max(_removalSize * n, 1.0)));
 
     switch (_updateMode) {
       case UpdateMode::EXCHANGE: {
@@ -396,14 +401,14 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateInterpolationMatrices(const E
       }
       case UpdateMode::REBUILD_AT_TOLERANCE: {
         double residualNorm = recalculateResidual(y, n).squaredNorm();
-        if (residualNorm > 2 * _referenceResidualNorm) {
+        if (residualNorm > _rebuildDelta * _referenceResidualNorm) {
           buildInterpolationMatrices(y, y, 0);
         }
         break;
       }
       case UpdateMode::EXCHANGE_AT_TOLERANCE: {
         double residualNorm = recalculateResidual(y, n).squaredNorm();
-        if (residualNorm > 2 * _referenceResidualNorm) {
+        if (residualNorm > _rebuildDelta * _referenceResidualNorm) {
           exchange(y, removalN);
         }
         break;

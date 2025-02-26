@@ -259,6 +259,10 @@ MappingConfiguration::MappingConfiguration(
                                .setDocumentation("Maximum number of iterations of the solver");
   auto attrgreedySubType = makeXMLAttribute(ATTR_GREEDY_SUBTYPE, "P-cholesky")
                                .setDocumentation("The type of greedy selection to be applied.");
+  auto attrgreedyRemovalSize = makeXMLAttribute(ATTR_GREEDY_REMOVAL_SIZE, 0.01)
+                               .setDocumentation(""); // TODO
+  auto attrgreedyRebuildDelta = makeXMLAttribute(ATTR_GREEDY_REBUILD_DELTA, 2.0)
+                               .setDocumentation(""); // TODO
 
   auto verticesPerCluster = XMLAttribute<int>(ATTR_VERTICES_PER_CLUSTER, 50)
                                 .setDocumentation("Average number of vertices per cluster (partition) applied in the rbf partition of unity method.");
@@ -279,7 +283,7 @@ MappingConfiguration::MappingConfiguration(
   // Add the relevant attributes to the relevant tags
   addAttributes(projectionTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint});
   addAttributes(rbfDirectTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead});
-  addAttributes(rbfGreedyTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol, attrMaxIterations, attrgreedySubType});
+  addAttributes(rbfGreedyTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol, attrMaxIterations, attrgreedySubType, attrgreedyRemovalSize, attrgreedyRebuildDelta});
   addAttributes(rbfIterativeTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPolynomial, attrXDead, attrYDead, attrZDead, attrSolverRtol});
   addAttributes(pumDirectTags, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrPumPolynomial, verticesPerCluster, relativeOverlap, projectToInput});
   addAttributes(rbfAliasTag, {attrFromMesh, attrToMesh, attrDirection, attrConstraint, attrXDead, attrYDead, attrZDead});
@@ -424,13 +428,15 @@ void MappingConfiguration::xmlTagCallback(
     // optional tags
     // We set here default values, but their actual value doesn't really matter.
     // It's just for the mapping methods, which do not use these attributes at all.
-    bool        xDead         = tag.getBooleanAttributeValue(ATTR_X_DEAD, false);
-    bool        yDead         = tag.getBooleanAttributeValue(ATTR_Y_DEAD, false);
-    bool        zDead         = tag.getBooleanAttributeValue(ATTR_Z_DEAD, false);
-    double      solverRtol    = tag.getDoubleAttributeValue(ATTR_SOLVER_RTOL, 1e-9);
-    int         solverMaxIter = tag.getDoubleAttributeValue(ATTR_MAX_ITERATIONS, 1e6);
-    std::string greedySubType = tag.getStringAttributeValue(ATTR_GREEDY_SUBTYPE, "P-cholesky");
-    std::string strPolynomial = tag.getStringAttributeValue(ATTR_POLYNOMIAL, POLYNOMIAL_SEPARATE);
+    bool        xDead              = tag.getBooleanAttributeValue(ATTR_X_DEAD, false);
+    bool        yDead              = tag.getBooleanAttributeValue(ATTR_Y_DEAD, false);
+    bool        zDead              = tag.getBooleanAttributeValue(ATTR_Z_DEAD, false);
+    double      solverRtol         = tag.getDoubleAttributeValue(ATTR_SOLVER_RTOL, 1e-9);
+    int         solverMaxIter      = tag.getDoubleAttributeValue(ATTR_MAX_ITERATIONS, 1e6);
+    double      greedyRemovalSize  = tag.getDoubleAttributeValue(ATTR_GREEDY_REMOVAL_SIZE, 0.01);
+    double      greedyRebuildDelta = tag.getDoubleAttributeValue(ATTR_GREEDY_REBUILD_DELTA, 2);
+    std::string greedySubType      = tag.getStringAttributeValue(ATTR_GREEDY_SUBTYPE, "P-cholesky");
+    std::string strPolynomial      = tag.getStringAttributeValue(ATTR_POLYNOMIAL, POLYNOMIAL_SEPARATE);
 
     // geometric multiscale related tags
     std::string geoMultiscaleType = tag.getStringAttributeValue(ATTR_GEOMETRIC_MULTISCALE_TYPE, "");
@@ -469,8 +475,11 @@ void MappingConfiguration::xmlTagCallback(
 
     ConfiguredMapping configuredMapping = createMapping(dir, type, fromMesh, toMesh, geoMultiscaleType, geoMultiscaleAxis, multiscaleRadius);
 
-    _rbfConfig               = configureRBFMapping(type, strPolynomial, xDead, yDead, zDead, solverRtol, solverMaxIter, verticesPerCluster, relativeOverlap, projectToInput);
+    _rbfConfig = configureRBFMapping(type, strPolynomial, xDead, yDead, zDead, solverRtol, solverMaxIter, verticesPerCluster, relativeOverlap, projectToInput);
+
     _rbfConfig.greedySubType = greedySubType; // TODO: move into configureRBFMapping?
+    _greedyParameter.greedyRebuildDelta= greedyRebuildDelta;
+    _greedyParameter.greedyRemovalSize = greedyRemovalSize;
 
     checkDuplicates(configuredMapping);
     _mappings.push_back(configuredMapping);
