@@ -80,7 +80,7 @@ protected:
   /// Residual of the last mapping. Used by the f-greedy methods and updated in buildInterpolationMatrices(). Might be used to decide whether to rebuild or not.
   double _referenceResidualNorm;
 
-  enum UpdateMode {REBUILD, REBUILD_AT_TOLERANCE, EXCHANGE, EXCHANGE_AT_TOLERANCE}; // TODO: entfernen
+  enum UpdateMode {REBUILD, REBUILD_AT_TOLERANCE, EXCHANGE, EXCHANGE_AT_TOLERANCE};
   UpdateMode _updateMode = UpdateMode::EXCHANGE;
 
   /// Only required for non-recommended f-greedy conservative mapping
@@ -89,8 +89,10 @@ protected:
   /**
    * @brief select the next greedy-center.
    * 
-   * [TODO] This implementation calculates the square-norm of the rows of the input and finds the maximum.
+   * This implementation either calculates the square-norm of the rows of the residual or the squared power function evaluations.
    * 
+   * @param[in] residual used when BETA = 1. Matrix format: _inSize x d, where d is the dimensionality of the data. 
+   * @param[in] powerFunction used when BETA = 0.
    * @return Pair consisting of the input mesh index and the maximum value of the greedy criterion.
    */
   template <int BETA>
@@ -111,15 +113,18 @@ protected:
   void fillPolynomialMatrices();
 
   /**
-   * @brief Update
+   * @brief Update kernel vector [K(xi1,x), K(xi2,x), ..., K(xin,x)], ids = [i1, 12, ..., in]
    * 
-   * @param[in] x
-   * @param[in] ids
+   * @param[in] x New center on which to evaluate the kernel basis functions
+   * @param[in] ids ids of centers corresponding to the kernel basis functions K(xij,*) which should be evaluated on x
    * @param[out] kernelVector
    */
   template <typename IndexContainer>
   void updateKernelVector(const mesh::Vertex &x, const IndexContainer &ids, Eigen::VectorXd &kernelVector) const;
   
+  /**
+   * @brief Solves system using the inverse of the Cholesky matrix. Applys the separate polynomial before f-greedy center search.
+   */
   void solveConsistentFGreedy(const time::Sample &inData, Eigen::VectorXd &outData);
 
   size_t estimateNumberOfCenters();
@@ -237,7 +242,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::updateKernelVector(const mesh::Vert
 
   const mesh::Mesh::VertexContainer &inputVertices = _inputMesh->vertices();
   for (const auto &j : ids | boost::adaptors::indexed()) {
-    const auto &y   = inputVertices.at(j.value()).rawCoords();
+    const auto &y           = inputVertices.at(j.value()).rawCoords();
     kernelVector(j.index()) = _basisFunction.evaluate(std::sqrt(computeSquaredDifference(x.rawCoords(), y, _activeAxis)));
   }
 }
@@ -307,11 +312,11 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, 
   Eigen::MatrixXd partialInverseA = Eigen::MatrixXd::Zero(2 * removalN - 1, 2 * removalN - 1);
 
   Eigen::MatrixXd interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all);
-  interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * interpolationCoeffs;
+  interpolationCoeffs                 = _invCholeskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * interpolationCoeffs;
 
   double minResidualNorm = std::numeric_limits<double>::max();
-  double rebuildIndex = n;
-  size_t blockHeight = removalN;
+  double rebuildIndex    = n;
+  size_t blockHeight     = removalN;
 
   for (size_t m = 0; m < n; m += blockHeight) {
     if (m + 2 * removalN > n) blockHeight = n - m;
@@ -322,7 +327,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::exchange(const Eigen::MatrixXd &y, 
 
     if (partialResidual <= minResidualNorm) {
       minResidualNorm = partialResidual;
-      rebuildIndex = m;
+      rebuildIndex    = m;
     }
   }
 
@@ -340,7 +345,7 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
   precice::profiling::Event updateEvent("map.greedy.update", profiling::Synchronize);
 
   const Eigen::VectorXd &linearisedVectors = inData.values;
-  Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, _inSize).transpose();
+  Eigen::MatrixXd y                        = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, _inSize).transpose();
 
   Eigen::MatrixXd polynomialCoeffs;
   if (_usesPolynomial) {
@@ -357,8 +362,8 @@ void GreedyMapping<RADIAL_BASIS_FUNCTION_T>::solveConsistentFGreedy(const time::
 
   size_t n = _greedyIDs.size();
 
-  Eigen::MatrixXd interpolationCoeffs = _invCholeskyA.block(0,0,n,n).triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all); //TODO: block for updateInverse(n0)
-  interpolationCoeffs = _invCholeskyA.block(0,0,n,n).transpose().triangularView<Eigen::Upper>() * interpolationCoeffs;
+  Eigen::MatrixXd interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).triangularView<Eigen::Lower>() * y(_greedyIDs, Eigen::all); //TODO: block for updateInverse(n0)
+  interpolationCoeffs                 = _invCholeskyA.block(0, 0, n, n).transpose().triangularView<Eigen::Upper>() * interpolationCoeffs;
 
   for (int d = 0; d < inData.dataDims; d++) {
     outData(Eigen::seqN(d, _outSize, inData.dataDims)) = _kernelEval.block(0, 0, n, _outSize).transpose() * interpolationCoeffs.col(d);

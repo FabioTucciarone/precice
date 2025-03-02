@@ -64,6 +64,9 @@ private:
 
   virtual void buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &startResidual, const size_t startIndex) override;
 
+  /**
+   * Update inverse keeping the upper left (startIndex-1 x startIndex-1) part of the matrix.
+   */
   void updateInverse(size_t startIndex);
   virtual Eigen::MatrixXd recalculateResidual(const Eigen::MatrixXd &y, size_t basisExtend) override;
 

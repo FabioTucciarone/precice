@@ -57,9 +57,19 @@ public:
 private:
   Eigen::MatrixXd _kernelMatrix;
 
+  /**
+   * @brief Update _kernelMatrix and residual.
+   */
   void updateResidual(Eigen::MatrixXd &residual, const Eigen::MatrixXd &y);
+  
+  /**
+   * @brief Update _kernelMatrix by appending a new column based on the center x.
+   */
   void addKernelMatrixColumn(const size_t greedyIndex);
 
+  /**
+   * @brief Update _kernelMatrix and power function.
+   */
   void updatePowerFunction(Eigen::VectorXd &powerFunction, const mesh::Vertex &x);
 
   virtual void buildInterpolationMatrices(const Eigen::MatrixXd &y, const Eigen::MatrixXd &startResidual, const size_t startIndex) override;
@@ -99,18 +109,6 @@ void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::addKernelMatrixColumn(cons
 
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
-void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updatePowerFunction(Eigen::VectorXd &powerFunction, const mesh::Vertex &x) {
-
-  const size_t n = _greedyIDs.size() - 1;
-  for (size_t j = 0; j < super::_inSize; j++) {
-    const auto &y       = super::_inputMesh->vertices().at(j).rawCoords();
-    _kernelMatrix(j, n) = _basisFunction.evaluate(std::sqrt(computeSquaredDifference(y, x.rawCoords(), super::_activeAxis)));
-  }
-  powerFunction -= (Eigen::VectorXd)(_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()).array().square();
-}
-
-
-template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 Eigen::MatrixXd GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::recalculateResidual(const Eigen::MatrixXd &y, const size_t basisExtend) {
 
   PRECICE_ASSERT(basisExtend <= _greedyIDs.size());
@@ -122,12 +120,24 @@ Eigen::MatrixXd GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::recalculateResi
 
 
 template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
+void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updatePowerFunction(Eigen::VectorXd &powerFunction, const mesh::Vertex &x) {
+
+  PRECICE_ASSERT(!_greedyIDs.empty());
+
+  const size_t n = _greedyIDs.size() - 1;
+  addKernelMatrixColumn(n);
+  powerFunction -= (Eigen::VectorXd)(_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()).array().square();
+}
+
+
+template <typename RADIAL_BASIS_FUNCTION_T, int BETA>
 void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::updateResidual(Eigen::MatrixXd &residual, const Eigen::MatrixXd &y) {
 
   PRECICE_ASSERT(!_greedyIDs.empty());
 
   const size_t n = _greedyIDs.size() - 1;
-  const Eigen::MatrixXd cy = _invCholeskyA.block(n, 0, 1, n + 1) * y(_greedyIDs, Eigen::all); // ersetze mit <_invCholeskyA.block(n, 0, 1, n + 1), _invCholeskyA.block(n, 0, 1, n + 1)>
+  addKernelMatrixColumn(n);
+  const Eigen::MatrixXd cy = _invCholeskyA.block(n, 0, 1, n + 1) * y(_greedyIDs, Eigen::all);
   residual -= (_kernelMatrix.block(0, 0, super::_inSize, n + 1) * _invCholeskyA.block(n, 0, 1, n + 1).transpose()) * cy;
 }
 
@@ -197,7 +207,6 @@ void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::buildInterpolationMatrices
     _invCholeskyA.block(n, 0, 1, n + 1) *= invP;
 
     if constexpr (BETA == F_GREEDY) {
-      addKernelMatrixColumn(n);
       updateResidual(residual, y);
     } else {
       updatePowerFunction(powerFunction, x);
@@ -223,7 +232,7 @@ void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::solveConservative(const ti
   const size_t          n = super::_greedyIDs.size();
   const Eigen::MatrixXd y = Eigen::Map<const Eigen::MatrixXd>(linearisedVectors.data(), inData.dataDims, super::_outSize).transpose();
 
-  Eigen::MatrixXd u =  super::_kernelEval.block(0, 0, n, super::_outSize) * y;
+  Eigen::MatrixXd u  = super::_kernelEval.block(0, 0, n, super::_outSize) * y;
   Eigen::MatrixXd Cu = _invCholeskyA.block(0, 0, n, n).template triangularView<Eigen::Lower>() * u;
   Eigen::MatrixXd greedySolution = (_invCholeskyA.block(0, 0, n, n).transpose().template triangularView<Eigen::Upper>() * Cu);
 
@@ -255,7 +264,7 @@ void GreedyCutMapping<RADIAL_BASIS_FUNCTION_T, BETA>::solveConsistent(const time
     y -= super::_polyMatrixQ * polynomialCoeffs;
   }
 
-  const Eigen::MatrixXd z = y(super::_greedyIDs, Eigen::all);
+  const Eigen::MatrixXd z  = y(super::_greedyIDs, Eigen::all);
   const Eigen::MatrixXd Cz = _invCholeskyA.block(0, 0, n, n).template triangularView<Eigen::Lower>() * z;
   const Eigen::MatrixXd interpolationCoeffs = _invCholeskyA.block(0, 0, n, n).transpose().template triangularView<Eigen::Upper>() * Cz;
 
