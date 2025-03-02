@@ -67,7 +67,6 @@ void testTimeDependentGreedyMapping(const std::string configFile, const TestCont
   auto meshBID = "MeshTwo";
   
   if (context.isNamed("SolverOne")) {
-    fmt::print(" >> SOLVER A\n");
     precice::Participant interfaceA("SolverOne", configFile, 0, 1);
     std::vector<int> idsA = generateMeshOne(interfaceA, meshAID);
     interfaceA.initialize();
@@ -87,16 +86,13 @@ void testTimeDependentGreedyMapping(const std::string configFile, const TestCont
     int it = 0;
 
     while (interfaceB.isCouplingOngoing()) {
-      fmt::print(" >> SOLVER B\n");
 
       double dt = interfaceB.getMaxTimeStepSize();
       std::array<double, 9> values;
       interfaceB.readData(meshBID, dataAID, idsB, dt, values);
       interfaceB.advance(dt);
 
-      std::cout << "B: it=" << it + 1 << "\n";
       for (size_t i = 0; i < values.size(); i++) {
-        fmt::print("{} = {}\n", values[i], expectedValues[i + it * 9]);
         BOOST_TEST(values[i] == expectedValues[i + it * 9], boost::test_tools::tolerance(1e-7));
       }
       it++;
@@ -190,7 +186,6 @@ void testGreedyMapping(const std::string configFile, const TestContext &context,
     interface.readData(meshTwoID, dataAID, ids, maxDt, values);
 
     for (size_t i = 0; i < values.size(); i++) {
-      fmt::print("{} = {},\n", values[i], expectedValues[i]);
       BOOST_TEST(values[i] == expectedValues[i], boost::test_tools::tolerance(1e-7));
     }
 
